@@ -1,0 +1,15 @@
+# Build output
+kessler
+*.exe
+*.o
+*.a
+*.so
+
+# Go workspace
+go.work
+go.work.sum
+
+# OS files
+.DS_Store
+.Trash
+Thumbs.db

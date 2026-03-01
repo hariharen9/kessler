@@ -1,0 +1,56 @@
+rules:
+  - name: "Node.js"
+    triggers: ["package.json"]
+    targets:
+      - path: "node_modules"
+        tier: "safe"
+      - path: ".next"
+        tier: "safe"
+      - path: "dist"
+        tier: "deep"
+      - path: "build"
+        tier: "deep"
+      - path: ".pnp.cjs"
+        tier: "safe"
+
+  - name: "Python"
+    triggers: ["requirements.txt", "pyproject.toml", "setup.py", "Pipfile"]
+    targets:
+      - path: "__pycache__"
+        tier: "safe"
+      - path: "venv"
+        tier: "safe"
+      - path: ".venv"
+        tier: "safe"
+      - path: "env"
+        tier: "safe"
+      - path: ".pytest_cache"
+        tier: "safe"
+
+  - name: "Rust"
+    triggers: ["Cargo.toml"]
+    targets:
+      - path: "target"
+        tier: "safe"
+
+  - name: "Java"
+    triggers: ["pom.xml", "build.gradle"]
+    targets:
+      - path: "target"
+        tier: "safe"
+      - path: "build"
+        tier: "safe"
+      - path: ".gradle"
+        tier: "safe"
+
+  - name: "Go"
+    triggers: ["go.mod"]
+    targets:
+      - path: "vendor"
+        tier: "safe"
+
+  - name: "macOS"
+    triggers: []
+    targets:
+      - path: ".DS_Store"
+        tier: "safe"
