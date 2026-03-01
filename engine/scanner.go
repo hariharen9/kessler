@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	_ "embed"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -10,18 +11,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+//go:embed default_rules.yaml
+var defaultRules []byte
+
 type Scanner struct {
 	Config Config
 }
 
-func NewScanner(configPath string) (*Scanner, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
+func NewScanner() (*Scanner, error) {
 	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
+	if err := yaml.Unmarshal(defaultRules, &config); err != nil {
 		return nil, err
 	}
 
@@ -56,6 +55,19 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 			}
 
 			for _, target := range matchedRule.Targets {
+				// --- DANGER ZONE SAFETY NET ---
+				// If the target exactly matches a known danger zone, skip it entirely
+				isDangerous := false
+				for _, dangerItem := range s.Config.DangerZone {
+					if target.Path == dangerItem {
+						isDangerous = true
+						break
+					}
+				}
+				if isDangerous {
+					continue
+				}
+
 				targetPath := filepath.Join(path, target.Path)
 				if info, err := os.Stat(targetPath); err == nil {
 					// --- THE GIT SAFETY NET ---
@@ -98,13 +110,14 @@ func (s *Scanner) matchRule(dir string) *Rule {
 		entryMap[e.Name()] = true
 	}
 
-	for _, rule := range s.Config.Rules {
+	for i := range s.Config.Rules {
+		rule := &s.Config.Rules[i]
 		if len(rule.Triggers) == 0 {
 			continue
 		}
 		for _, trigger := range rule.Triggers {
 			if entryMap[trigger] {
-				return &rule
+				return rule
 			}
 		}
 	}

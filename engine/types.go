@@ -20,7 +20,8 @@ type Rule struct {
 }
 
 type Config struct {
-	Rules []Rule `yaml:"rules"`
+	Rules      []Rule   `yaml:"rules"`
+	DangerZone []string `yaml:"danger_zone"`
 }
 
 type Artifact struct {
