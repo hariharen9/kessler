@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -76,14 +77,20 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 						continue
 					}
 
-					size := s.calculateSize(targetPath, info)
+					size, modTime := s.calculateSizeAndModTime(targetPath, info)
 					if size > 0 {
 						project.Artifacts = append(project.Artifacts, Artifact{
-							Path: targetPath,
-							Size: size,
-							Tier: target.Tier,
+							Path:    targetPath,
+							Size:    size,
+							Tier:    target.Tier,
+							ModTime: modTime,
 						})
 						project.TotalSize += size
+						
+						// Update project's last modified time
+						if project.LastModTime.IsZero() || modTime.After(project.LastModTime) {
+							project.LastModTime = modTime
+						}
 					}
 				}
 			}
@@ -124,22 +131,35 @@ func (s *Scanner) matchRule(dir string) *Rule {
 	return nil
 }
 
-func (s *Scanner) calculateSize(path string, info fs.FileInfo) int64 {
+func (s *Scanner) calculateSizeAndModTime(path string, info fs.FileInfo) (int64, time.Time) {
+	var size int64
+	var latestModTime time.Time
+
 	if !info.IsDir() {
-		return info.Size()
+		return info.Size(), info.ModTime()
 	}
 
-	var size int64
 	filepath.WalkDir(path, func(_ string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if info, err := d.Info(); err == nil && !info.IsDir() {
-			size += info.Size()
+		if info, err := d.Info(); err == nil {
+			if !info.IsDir() {
+				size += info.Size()
+			}
+			if modTime := info.ModTime(); modTime.After(latestModTime) {
+				latestModTime = modTime
+			}
 		}
 		return nil
 	})
-	return size
+	
+	// If empty directory, just return the directory's modtime
+	if latestModTime.IsZero() {
+		latestModTime = info.ModTime()
+	}
+	
+	return size, latestModTime
 }
 
 // isTrackedByGit checks if a specific artifact path contains files tracked by Git.

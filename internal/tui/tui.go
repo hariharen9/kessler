@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -51,6 +52,18 @@ type UIModel struct {
 	height             int
 	failedTrashCount   int
 	failedTrashTargets []string
+	
+	// Progress tracking for animated cleaning
+	totalToClean    int
+	cleanedCount    int
+	currentCleaning string
+	cleaningQueue   []engine.Artifact
+}
+
+type cleanStepMsg struct {
+	artifact   engine.Artifact
+	err        error
+	isFallback bool
 }
 
 var (
@@ -60,8 +73,8 @@ var (
 	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).MarginTop(1)
 	deepStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Bold(true) // Red color for danger mode
-	safeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))             // Green for safe mode
-	
+	safeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))            // Green for safe mode
+
 	paneStyle     = lipgloss.NewStyle().Padding(1, 2)
 	statsBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -123,75 +136,106 @@ func (m UIModel) startScan() tea.Cmd {
 	}
 }
 
+func (m *UIModel) startCleaning() tea.Cmd {
+	m.cleaningQueue = []engine.Artifact{}
+	for _, proj := range m.projects {
+		if _, ok := m.selected[proj.Path]; ok {
+			for _, artifact := range proj.Artifacts {
+				if !m.includeDeep && artifact.Tier == engine.TierDeep {
+					continue
+				}
+				m.cleaningQueue = append(m.cleaningQueue, artifact)
+			}
+		}
+	}
+	m.totalToClean = len(m.cleaningQueue)
+	m.cleanedCount = 0
+
+	if m.totalToClean == 0 {
+		m.state = stateDone
+		return tea.Quit
+	}
+
+	return m.cleanNext()
+}
+
+func (m *UIModel) cleanNext() tea.Cmd {
+	if len(m.cleaningQueue) == 0 {
+		return func() tea.Msg {
+			return cleanResult{
+				freedSpace:         m.freedSpace,
+				failedTrashTargets: m.failedTrashTargets,
+			}
+		}
+	}
+
+	artifact := m.cleaningQueue[0]
+	m.cleaningQueue = m.cleaningQueue[1:]
+	m.currentCleaning = artifact.Path
+
+	return func() tea.Msg {
+		var err error
+		if m.permanent {
+			err = os.RemoveAll(artifact.Path)
+		} else {
+			absPath, pathErr := filepath.Abs(artifact.Path)
+			if pathErr == nil {
+				_, err = trash.MoveToTrash(absPath)
+			} else {
+				err = pathErr
+			}
+		}
+
+		// Small delay to make animation visible for small files
+		time.Sleep(50 * time.Millisecond)
+
+		return cleanStepMsg{artifact: artifact, err: err}
+	}
+}
+
+func (m *UIModel) startFallbackCleaning() tea.Cmd {
+	m.cleaningQueue = []engine.Artifact{}
+	for _, path := range m.failedTrashTargets {
+		// Find artifact details
+		for _, p := range m.projects {
+			for _, a := range p.Artifacts {
+				if a.Path == path {
+					m.cleaningQueue = append(m.cleaningQueue, a)
+					break
+				}
+			}
+		}
+	}
+	m.failedTrashTargets = []string{} // Reset
+	m.totalToClean = len(m.cleaningQueue)
+	m.cleanedCount = 0
+	m.permanent = true
+
+	return m.cleanNextFallback()
+}
+
+func (m *UIModel) cleanNextFallback() tea.Cmd {
+	if len(m.cleaningQueue) == 0 {
+		return func() tea.Msg {
+			return m.freedSpace
+		}
+	}
+
+	artifact := m.cleaningQueue[0]
+	m.cleaningQueue = m.cleaningQueue[1:]
+	m.currentCleaning = artifact.Path
+
+	return func() tea.Msg {
+		err := os.RemoveAll(artifact.Path)
+		time.Sleep(50 * time.Millisecond)
+		return cleanStepMsg{artifact: artifact, err: err, isFallback: true}
+	}
+}
+
 type cleanResult struct {
 	freedSpace         int64
 	failedTrashTargets []string
 }
-
-func (m UIModel) cleanSelected() tea.Cmd {
-	return func() tea.Msg {
-		var result cleanResult
-		for _, proj := range m.projects {
-			if _, ok := m.selected[proj.Path]; ok {
-				for _, artifact := range proj.Artifacts {
-					// Guard: Only delete deep artifacts if includeDeep is true
-					if !m.includeDeep && artifact.Tier == engine.TierDeep {
-						continue
-					}
-					
-					var err error
-					if m.permanent {
-						err = os.RemoveAll(artifact.Path)
-					} else {
-						// Cross-platform trash logic
-						absPath, pathErr := filepath.Abs(artifact.Path)
-						if pathErr == nil {
-							_, err = trash.MoveToTrash(absPath)
-						} else {
-							err = pathErr
-						}
-						
-						if err != nil {
-							// Trash failed, save to list for user confirmation instead of auto-fallback
-							result.failedTrashTargets = append(result.failedTrashTargets, artifact.Path)
-							continue // Don't count space as freed yet
-						}
-					}
-					
-					if err == nil {
-						result.freedSpace += artifact.Size
-					}
-				}
-			}
-		}
-		return result
-	}
-}
-
-func (m UIModel) fallbackClean() tea.Cmd {
-	return func() tea.Msg {
-		var freed int64
-		for _, path := range m.failedTrashTargets {
-			// Find the size to add
-			var size int64
-			for _, p := range m.projects {
-				for _, a := range p.Artifacts {
-					if a.Path == path {
-						size = a.Size
-						break
-					}
-				}
-			}
-
-			err := os.RemoveAll(path)
-			if err == nil {
-				freed += size
-			}
-		}
-		return freed
-	}
-}
-
 // getFilteredProjects applies the search filter, the tier filter, and the sorting
 func (m UIModel) getFilteredProjects() []engine.Project {
 	var filtered []engine.Project
@@ -205,7 +249,7 @@ func (m UIModel) getFilteredProjects() []engine.Project {
 				activeSize += a.Size
 			}
 		}
-		
+
 		// If a project has no artifacts for the current tier, skip it
 		if activeSize == 0 {
 			continue
@@ -243,7 +287,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		
+
 		// If the search bar is focused, handle input differently
 		if m.state == stateResults && m.textInput.Focused() {
 			switch msg.String() {
@@ -264,11 +308,10 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch strings.ToLower(msg.String()) {
 			case "y":
 				m.state = stateCleaning
-				m.permanent = true // We are permanently deleting them now
-				return m, m.fallbackClean()
+				return m, m.startFallbackCleaning()
 			case "n", "esc", "q", "ctrl+c":
 				m.state = stateDone
-				return m, nil
+				return m, tea.Quit
 			}
 			return m, nil
 		}
@@ -324,7 +367,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateResults {
 				filtered := m.getFilteredProjects()
 				allSelected := true
-				
+
 				// First pass to see if everything is already selected
 				for _, p := range filtered {
 					if _, ok := m.selected[p.Path]; !ok {
@@ -349,13 +392,13 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateResults && len(m.selected) > 0 {
 				m.state = stateCleaning
 				m.permanent = false
-				return m, m.cleanSelected()
+				return m, m.startCleaning()
 			}
 		case "X": // Capital X for Nuke
 			if m.state == stateResults && len(m.selected) > 0 {
 				m.state = stateCleaning
 				m.permanent = true
-				return m, m.cleanSelected()
+				return m, m.startCleaning()
 			}
 		}
 
@@ -363,6 +406,20 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.projects = msg
 		m.state = stateResults
 		return m, nil
+
+	case cleanStepMsg:
+		if msg.err == nil {
+			m.freedSpace += msg.artifact.Size
+		} else if !msg.isFallback {
+			// Save failed trash targets if not already in fallback
+			m.failedTrashTargets = append(m.failedTrashTargets, msg.artifact.Path)
+		}
+		m.cleanedCount++
+		
+		if msg.isFallback {
+			return m, m.cleanNextFallback()
+		}
+		return m, m.cleanNext()
 
 	case cleanResult:
 		m.freedSpace = msg.freedSpace
@@ -392,11 +449,40 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func getIcon(projectType string) string {
+	switch projectType {
+	case "Node.js / JS Ecosystem":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#83CD29")).Render("") // Node green
+	case "Python":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#3776AB")).Render("") // Python blue
+	case "Rust":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#DEA584")).Render("") // Rust orange
+	case "Go":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Render("") // Go cyan
+	case "Java / JVM":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#ED8B00")).Render("") // Java orange
+	case "PHP":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#777BB4")).Render("") // PHP purple
+	case "Ruby":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#CC342D")).Render("") // Ruby red
+	case ".NET / C#":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#512BD4")).Render("") // .NET purple
+	case "Elixir":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#4E2A8E")).Render("") // Elixir deep purple
+	case "Terraform / IaC":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#7B42BC")).Render("󱁢") // Terraform purple
+	case "OS & Editor Caches":
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("⚙️")
+	default:
+		return "📁"
+	}
+}
+
 func (m UIModel) View() string {
 	switch m.state {
 	case stateScanning:
 		return fmt.Sprintf("\n %s Scanning %s and verifying Git status...\n\n", m.spinner.View(), m.scanPath)
-	
+
 	case stateResults:
 		filtered := m.getFilteredProjects()
 
@@ -443,12 +529,33 @@ func (m UIModel) View() string {
 
 				baseName := filepath.Base(proj.Path)
 				// Truncate baseName if it's too long
-				if len(baseName) > 30 {
-					baseName = baseName[:27] + "..."
+				if len(baseName) > 25 {
+					baseName = baseName[:22] + "..."
 				}
 
-				line := fmt.Sprintf("%s [%s] %s (%s) - %s", cursor, checked, baseName, proj.Type, formatBytes(proj.TotalSize))
-				
+				// Calculate time since last touch
+				var timeStr string
+				if !proj.LastModTime.IsZero() {
+					duration := time.Since(proj.LastModTime)
+					days := int(duration.Hours() / 24)
+					if days > 365 {
+						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Render(fmt.Sprintf("%dy", days/365)) // Red if > 1 year
+					} else if days > 30 {
+						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Render(fmt.Sprintf("%dd", days)) // Yellow if > 1 month
+					} else if days == 0 {
+						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("today")
+					} else {
+						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(fmt.Sprintf("%dd", days)) // Grey if recent
+					}
+				}
+
+				// We want a clean columnar look. Format it with padding.
+				baseNamePadded := fmt.Sprintf("%-26s", baseName)
+				timeStrPadded := fmt.Sprintf("[%5s]", timeStr)
+				sizeStr := formatBytes(proj.TotalSize)
+
+				line := fmt.Sprintf("%s [%s] %s %s %s %s - %s", cursor, checked, getIcon(proj.Type), baseNamePadded, timeStrPadded, proj.Type, sizeStr)
+
 				if _, ok := m.selected[proj.Path]; ok {
 					leftContent.WriteString(selectedStyle.Render(line) + "\n")
 				} else {
@@ -456,13 +563,11 @@ func (m UIModel) View() string {
 				}
 			}
 		}
-		
 		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   s: sort   •   /: search   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
 
 		// Build Right Pane (Stats)
 		var rightContent strings.Builder
 		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 ORBITAL TELEMETRY") + "\n\n")
-
 		// Disk Usage
 		usage, err := disk.Usage("/")
 		if err == nil {
@@ -539,6 +644,31 @@ func (m UIModel) View() string {
 			}
 		}
 
+		// Preview Pane (Deep Context)
+		if len(filtered) > 0 && m.cursor < len(filtered) {
+			activeProj := filtered[m.cursor]
+
+			rightContent.WriteString("\n")
+			rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 TARGET PREVIEW") + "\n\n")
+			rightContent.WriteString(fmt.Sprintf("%s %s\n", getIcon(activeProj.Type), filepath.Base(activeProj.Path)))
+
+			for _, artifact := range activeProj.Artifacts {
+				if !m.includeDeep && artifact.Tier == engine.TierDeep {
+					continue
+				}
+
+				tierColor := lipgloss.Color("#04B575") // Safe Green
+				if artifact.Tier == engine.TierDeep {
+					tierColor = lipgloss.Color("#E5C07B") // Deep Yellow
+				} else if artifact.Tier == engine.TierDanger {
+					tierColor = lipgloss.Color("#FF5C5C") // Danger Red
+				}
+
+				coloredPath := lipgloss.NewStyle().Foreground(tierColor).Render(filepath.Base(artifact.Path))
+				rightContent.WriteString(fmt.Sprintf(" ├─ %-15s : %s\n", coloredPath, formatBytes(artifact.Size)))
+			}
+		}
+
 		statsBox := statsBoxStyle.Render(rightContent.String())
 
 		// We need to calculate widths so the layout works nicely.
@@ -563,19 +693,48 @@ func (m UIModel) View() string {
 		if m.permanent {
 			msg = "Permanently nuking debris (No undo!)..."
 		}
-		return fmt.Sprintf("\n 🧹 Firing orbital lasers. %s\n", msg)
+		
+		// Progress bar
+		width := 40
+		if m.width > 0 && m.width < 50 {
+			width = m.width - 10
+		}
+		
+		progress := float64(m.cleanedCount) / float64(m.totalToClean)
+		filled := int(progress * float64(width))
+		if filled > width {
+			filled = width
+		}
+		
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+		coloredBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(bar)
+		
+		// Truncate current cleaning path
+		current := m.currentCleaning
+		if len(current) > 50 {
+			current = "..." + current[len(current)-47:]
+		}
+		
+		return fmt.Sprintf(
+			"\n 🧹 Firing orbital lasers...\n\n %s\n\n %s [%d/%d]\n\n Vaporizing: %s\n",
+			msg,
+			coloredBar,
+			m.cleanedCount,
+			m.totalToClean,
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Render(current),
+		)
 
 	case stateDone:
 		msg := "safely moved to the Trash."
 		if m.permanent {
 			msg = "permanently deleted."
 		}
-		
+
 		var failMsg string
 		if len(m.failedTrashTargets) > 0 && !m.permanent {
 			failMsg = fmt.Sprintf("\n ⚠️  Note: %d items could not be deleted.\n", len(m.failedTrashTargets))
 		}
-		
+
 		return fmt.Sprintf("\n ✨ Cleanup Complete! %s %s%s\n\n", formatBytes(m.freedSpace), msg, failMsg)
 
 	case stateConfirmFallback:
@@ -584,7 +743,7 @@ func (m UIModel) View() string {
 		s += " This usually happens when clearing items across different drive partitions.\n\n"
 		s += deepStyle.Render(" Do you want to PERMANENTLY NUKE these remaining items? (y/n)") + "\n\n"
 		return s
-		
+
 	case stateQuitting:
 		return "\n 👋 Orbit clear. Catch you on the next sweep!\n\n"
 	}

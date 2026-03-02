@@ -1,5 +1,7 @@
 package engine
 
+import "time"
+
 type Tier string
 
 const (
@@ -25,14 +27,16 @@ type Config struct {
 }
 
 type Artifact struct {
-	Path string
-	Size int64
-	Tier Tier
+	Path    string
+	Size    int64
+	Tier    Tier
+	ModTime time.Time
 }
 
 type Project struct {
-	Path      string
-	Type      string // e.g., "Node.js", "Python"
-	Artifacts []Artifact
-	TotalSize int64
+	Path        string
+	Type        string // e.g., "Node.js", "Python"
+	Artifacts   []Artifact
+	TotalSize   int64
+	LastModTime time.Time
 }
