@@ -15,14 +15,12 @@ Over time, it gets clogged with `node_modules`, stray `build/` folders, forgotte
 - 🏎️ **Blazingly Fast:** Written in Go, it scans massive directory trees concurrently in milliseconds.
 - 🧠 **Context-Aware Engine:** Doesn't just blindly delete folders. It looks for triggers (e.g., `package.json`, `Cargo.toml`) to identify project types and *only* targets known safe artifacts for that specific ecosystem.
 - 🛡️ **The Git Safety Net:** Before Kessler flags *any* folder as junk, it silently queries Git (`git ls-files`). If a folder contains files actively tracked by version control, Kessler immediately aborts and ignores it.
-- ♻️ **OS Trash Integration:** Mistakes happen. Instead of using a terrifying `rm -rf`, Kessler safely moves debris to your OS Trash/Recycle Bin, giving you an "Undo" button.
-- 🎨 **Beautiful TUI:** Powered by Charmbracelet's Bubble Tea, offering a stunning, interactive terminal dashboard to review and select what to vaporize.
+- ♻️ **OS Trash Integration:** Mistakes happen. Instead of using a terrifying `rm -rf`, Kessler safely moves debris to your native OS Trash/Recycle Bin (supports macOS, Windows, and Linux), giving you an "Undo" button.
+- 🎨 **Beautiful TUI & Telemetry:** Powered by Charmbracelet's Bubble Tea. Features an interactive dashboard with live "Orbital Telemetry," displaying your root drive usage, ecosystem breakdown, and visual space tracking.
 
 ---
 
 ## 🚀 Installation
-
-*Note: Pre-compiled binaries via Homebrew and apt are coming soon.*
 
 You can install Kessler directly using Go:
 
@@ -55,9 +53,10 @@ kessler .
 
 ### The Interface
 1. **Wait** a fraction of a second while Kessler analyzes the directory tree and verifies Git statuses.
-2. **Review** the interactive dashboard showing all discovered projects and the exact byte-size of their regeneratable debris.
-3. **Select** the projects you want to clean using the `Spacebar` (navigate with arrow keys or `j`/`k`).
-4. **Vaporize** the space junk by hitting `Enter`. 
+2. **Review** the interactive dashboard showing all discovered projects, telemetry data, and exact byte-sizes.
+3. **Filter & Sort** using `/` to search, `s` to sort by size/name, or `t` to toggle between Safe and Deep Clean modes.
+4. **Select** the projects you want to clean using `Spacebar` (or `a` to select all). 
+5. **Vaporize** the space junk by hitting `Enter` (Move to Trash) or `X` (Permanently Nuke).
 
 ---
 
@@ -85,7 +84,7 @@ There are other tools that delete `node_modules`. Kessler is built with **develo
 
 1. **It respects Git:** A folder named `vendor/` might be a junk cache in one project, but actively committed source code in another. If Git tracks it, Kessler won't touch it.
 2. **It respects State:** It never targets files required to reproduce a build (like `package-lock.json` or `Cargo.lock`) or environment secrets (like `.env`).
-3. **It respects the OS:** By moving files to the Trash Bin instead of permanent deletion, a mistaken sweep is an easy fix, not a catastrophic data loss event.
+3. **It respects the OS:** By moving files to the Trash Bin instead of permanent deletion, a mistaken sweep is an easy fix, not a catastrophic data loss event. It will safely prompt you if cross-drive trashing fails.
 
 ---
 

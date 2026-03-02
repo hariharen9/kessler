@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hariharen/kessler/engine"
+	"github.com/laurent22/go-trash"
+	"github.com/shirou/gopsutil/v3/disk"
 )
 
 type state int
@@ -21,7 +22,9 @@ const (
 	stateScanning state = iota
 	stateResults
 	stateCleaning
+	stateConfirmFallback
 	stateDone
+	stateQuitting
 )
 
 type SortMode int
@@ -32,18 +35,22 @@ const (
 )
 
 type UIModel struct {
-	scanner      *engine.Scanner
-	projects     []engine.Project
-	spinner      spinner.Model
-	textInput    textinput.Model
-	state        state
-	cursor       int
-	selected     map[string]struct{} // Keyed by project path to persist across filters
-	freedSpace   int64
-	scanPath     string
-	sortMode     SortMode
-	includeDeep  bool
-	permanent    bool
+	scanner            *engine.Scanner
+	projects           []engine.Project
+	spinner            spinner.Model
+	textInput          textinput.Model
+	state              state
+	cursor             int
+	selected           map[string]struct{} // Keyed by project path to persist across filters
+	freedSpace         int64
+	scanPath           string
+	sortMode           SortMode
+	includeDeep        bool
+	permanent          bool
+	width              int
+	height             int
+	failedTrashCount   int
+	failedTrashTargets []string
 }
 
 var (
@@ -54,6 +61,13 @@ var (
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).MarginTop(1)
 	deepStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Bold(true) // Red color for danger mode
 	safeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))             // Green for safe mode
+	
+	paneStyle     = lipgloss.NewStyle().Padding(1, 2)
+	statsBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7D56F4")).
+			Padding(1, 2).
+			MarginLeft(2)
 )
 
 func formatBytes(b int64) string {
@@ -109,9 +123,14 @@ func (m UIModel) startScan() tea.Cmd {
 	}
 }
 
+type cleanResult struct {
+	freedSpace         int64
+	failedTrashTargets []string
+}
+
 func (m UIModel) cleanSelected() tea.Cmd {
 	return func() tea.Msg {
-		var freed int64
+		var result cleanResult
 		for _, proj := range m.projects {
 			if _, ok := m.selected[proj.Path]; ok {
 				for _, artifact := range proj.Artifacts {
@@ -124,19 +143,49 @@ func (m UIModel) cleanSelected() tea.Cmd {
 					if m.permanent {
 						err = os.RemoveAll(artifact.Path)
 					} else {
-						// Simple trash logic here for MVP
-						home, _ := os.UserHomeDir()
-						dest := filepath.Join(home, ".Trash", fmt.Sprintf("%s-%d", filepath.Base(artifact.Path), time.Now().Unix()))
-						err = os.Rename(artifact.Path, dest)
+						// Cross-platform trash logic
+						absPath, pathErr := filepath.Abs(artifact.Path)
+						if pathErr == nil {
+							_, err = trash.MoveToTrash(absPath)
+						} else {
+							err = pathErr
+						}
+						
 						if err != nil {
-							err = os.RemoveAll(artifact.Path)
+							// Trash failed, save to list for user confirmation instead of auto-fallback
+							result.failedTrashTargets = append(result.failedTrashTargets, artifact.Path)
+							continue // Don't count space as freed yet
 						}
 					}
 					
 					if err == nil {
-						freed += artifact.Size
+						result.freedSpace += artifact.Size
 					}
 				}
+			}
+		}
+		return result
+	}
+}
+
+func (m UIModel) fallbackClean() tea.Cmd {
+	return func() tea.Msg {
+		var freed int64
+		for _, path := range m.failedTrashTargets {
+			// Find the size to add
+			var size int64
+			for _, p := range m.projects {
+				for _, a := range p.Artifacts {
+					if a.Path == path {
+						size = a.Size
+						break
+					}
+				}
+			}
+
+			err := os.RemoveAll(path)
+			if err == nil {
+				freed += size
 			}
 		}
 		return freed
@@ -188,14 +237,22 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
 	case tea.KeyMsg:
 		
 		// If the search bar is focused, handle input differently
-		if m.textInput.Focused() {
+		if m.state == stateResults && m.textInput.Focused() {
 			switch msg.String() {
 			case "enter", "esc":
 				m.textInput.Blur()
 				return m, nil
+			case "ctrl+c":
+				m.state = stateQuitting
+				return m, tea.Quit
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)
 				m.cursor = 0 // Reset cursor when search changes
@@ -203,9 +260,23 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.state == stateConfirmFallback {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				m.state = stateCleaning
+				m.permanent = true // We are permanently deleting them now
+				return m, m.fallbackClean()
+			case "n", "esc", "q", "ctrl+c":
+				m.state = stateDone
+				return m, nil
+			}
+			return m, nil
+		}
+
 		// Normal Mode Commands
 		switch msg.String() {
 		case "ctrl+c", "q":
+			m.state = stateQuitting
 			return m, tea.Quit
 		case "up", "k":
 			if m.state == stateResults && m.cursor > 0 {
@@ -249,6 +320,31 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		case "a": // Select all visible
+			if m.state == stateResults {
+				filtered := m.getFilteredProjects()
+				allSelected := true
+				
+				// First pass to see if everything is already selected
+				for _, p := range filtered {
+					if _, ok := m.selected[p.Path]; !ok {
+						allSelected = false
+						break
+					}
+				}
+
+				if allSelected {
+					// If all selected, deselect all visible
+					for _, p := range filtered {
+						delete(m.selected, p.Path)
+					}
+				} else {
+					// If not all selected, select all visible
+					for _, p := range filtered {
+						m.selected[p.Path] = struct{}{}
+					}
+				}
+			}
 		case "enter":
 			if m.state == stateResults && len(m.selected) > 0 {
 				m.state = stateCleaning
@@ -268,10 +364,20 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.state = stateResults
 		return m, nil
 
-	case int64: // Finished cleaning
-		m.freedSpace = msg
+	case cleanResult:
+		m.freedSpace = msg.freedSpace
+		if len(msg.failedTrashTargets) > 0 {
+			m.failedTrashTargets = msg.failedTrashTargets
+			m.state = stateConfirmFallback
+			return m, nil
+		}
 		m.state = stateDone
-		return m, nil // Don't quit immediately so user sees the message
+		return m, tea.Quit
+
+	case int64: // Finished fallback cleaning
+		m.freedSpace += msg
+		m.state = stateDone
+		return m, tea.Quit
 
 	case error:
 		fmt.Println("Error:", msg)
@@ -292,8 +398,6 @@ func (m UIModel) View() string {
 		return fmt.Sprintf("\n %s Scanning %s and verifying Git status...\n\n", m.spinner.View(), m.scanPath)
 	
 	case stateResults:
-		s := titleStyle.Render("🚀 KESSLER: COMMAND CENTER") + "\n\n"
-		
 		filtered := m.getFilteredProjects()
 
 		var totalSelectable int64
@@ -312,14 +416,17 @@ func (m UIModel) View() string {
 			tierText = deepStyle.Render("DEEP CLEAN MODE (Includes Binaries & Builds)")
 		}
 
-		s += fmt.Sprintf(" %s\n\n", m.textInput.View())
-		s += fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s | Mode: %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText)
+		// Build Left Pane
+		var leftContent strings.Builder
+		leftContent.WriteString(titleStyle.Render("🚀 KESSLER: COMMAND CENTER") + "\n\n")
+		leftContent.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
+		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s | Mode: %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText))
 
 		if len(filtered) == 0 {
-			s += " No project artifacts match the current filters. Orbit is clear!\n"
+			leftContent.WriteString(" No project artifacts match the current filters. Orbit is clear!\n")
 		} else {
 			for i, proj := range filtered {
-				// Only show a limited number of lines to avoid terminal overflow (Pagination)
+				// Pagination
 				if i < m.cursor-5 || i > m.cursor+10 {
 					continue
 				}
@@ -335,18 +442,121 @@ func (m UIModel) View() string {
 				}
 
 				baseName := filepath.Base(proj.Path)
+				// Truncate baseName if it's too long
+				if len(baseName) > 30 {
+					baseName = baseName[:27] + "..."
+				}
+
 				line := fmt.Sprintf("%s [%s] %s (%s) - %s", cursor, checked, baseName, proj.Type, formatBytes(proj.TotalSize))
 				
 				if _, ok := m.selected[proj.Path]; ok {
-					s += selectedStyle.Render(line) + "\n"
+					leftContent.WriteString(selectedStyle.Render(line) + "\n")
 				} else {
-					s += itemStyle.Render(line) + "\n"
+					leftContent.WriteString(itemStyle.Render(line) + "\n")
 				}
 			}
 		}
 		
-		s += helpStyle.Render("\n ↑/↓: nav • space: select • t: tier • s: sort • /: search • enter: trash • X: nuke • q: quit\n")
-		return s
+		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   s: sort   •   /: search   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
+
+		// Build Right Pane (Stats)
+		var rightContent strings.Builder
+		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 ORBITAL TELEMETRY") + "\n\n")
+
+		// Disk Usage
+		usage, err := disk.Usage("/")
+		if err == nil {
+			usedPercent := usage.UsedPercent
+			rightContent.WriteString(fmt.Sprintf("Drive Total : %s\n", formatBytes(int64(usage.Total))))
+			rightContent.WriteString(fmt.Sprintf("Drive Used  : %s (%.1f%%)\n", formatBytes(int64(usage.Used)), usedPercent))
+			rightContent.WriteString(fmt.Sprintf("Drive Free  : %s\n\n", formatBytes(int64(usage.Free))))
+
+			// Simple progress bar
+			barWidth := 25
+			usedBlocks := int((usedPercent / 100.0) * float64(barWidth))
+			if usedBlocks > barWidth {
+				usedBlocks = barWidth
+			}
+			if usedBlocks < 0 {
+				usedBlocks = 0
+			}
+			bar := strings.Repeat("█", usedBlocks) + strings.Repeat("░", barWidth-usedBlocks)
+
+			barColor := lipgloss.Color("#04B575") // Green
+			if usedPercent > 90 {
+				barColor = lipgloss.Color("#FF5C5C") // Red
+			} else if usedPercent > 75 {
+				barColor = lipgloss.Color("#E5C07B") // Yellow
+			}
+			coloredBar := lipgloss.NewStyle().Foreground(barColor).Render(bar)
+			rightContent.WriteString(fmt.Sprintf("[%s]\n\n", coloredBar))
+		} else {
+			rightContent.WriteString("Drive Stats : Unavailable\n\n")
+		}
+
+		// Selected Debris Size
+		var selectedSize int64
+		for _, proj := range m.projects {
+			if _, ok := m.selected[proj.Path]; ok {
+				for _, artifact := range proj.Artifacts {
+					if !m.includeDeep && artifact.Tier == engine.TierDeep {
+						continue
+					}
+					selectedSize += artifact.Size
+				}
+			}
+		}
+
+		rightContent.WriteString(fmt.Sprintf("Total Debris: %s\n", formatBytes(totalSelectable)))
+		rightContent.WriteString(fmt.Sprintf("Selected    : %s\n", selectedStyle.Render(formatBytes(selectedSize))))
+		rightContent.WriteString(fmt.Sprintf("Projects    : %d\n\n", len(filtered)))
+
+		// Type Breakdown
+		breakdown := make(map[string]int64)
+		for _, p := range filtered {
+			breakdown[p.Type] += p.TotalSize
+		}
+
+		if len(breakdown) > 0 {
+			rightContent.WriteString("Breakdown by Type:\n")
+			type kv struct {
+				Key   string
+				Value int64
+			}
+			var ss []kv
+			for k, v := range breakdown {
+				ss = append(ss, kv{k, v})
+			}
+			sort.Slice(ss, func(i, j int) bool {
+				return ss[i].Value > ss[j].Value
+			})
+			for i, kv := range ss {
+				if i > 5 { // Show top 6 types to avoid making the box too tall
+					rightContent.WriteString(" • ...\n")
+					break
+				}
+				rightContent.WriteString(fmt.Sprintf(" • %-15s: %s\n", kv.Key, formatBytes(kv.Value)))
+			}
+		}
+
+		statsBox := statsBoxStyle.Render(rightContent.String())
+
+		// We need to calculate widths so the layout works nicely.
+		// If width is 0 (WindowSizeMsg hasn't arrived yet), we'll guess a width.
+		windowWidth := m.width
+		if windowWidth == 0 {
+			windowWidth = 100
+		}
+
+		statsBoxWidth := lipgloss.Width(statsBox)
+		leftPaneWidth := windowWidth - statsBoxWidth - 4
+		if leftPaneWidth < 50 {
+			leftPaneWidth = 50 // fallback width to ensure content doesn't crash formatting
+		}
+
+		leftPaneContent := lipgloss.NewStyle().Width(leftPaneWidth).Render(leftContent.String())
+
+		return paneStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, leftPaneContent, statsBox))
 
 	case stateCleaning:
 		msg := "Safely moving debris to Trash Bin..."
@@ -360,7 +570,23 @@ func (m UIModel) View() string {
 		if m.permanent {
 			msg = "permanently deleted."
 		}
-		return fmt.Sprintf("\n ✨ Cleanup Complete! %s %s\n\n", formatBytes(m.freedSpace), msg)
+		
+		var failMsg string
+		if len(m.failedTrashTargets) > 0 && !m.permanent {
+			failMsg = fmt.Sprintf("\n ⚠️  Note: %d items could not be deleted.\n", len(m.failedTrashTargets))
+		}
+		
+		return fmt.Sprintf("\n ✨ Cleanup Complete! %s %s%s\n\n", formatBytes(m.freedSpace), msg, failMsg)
+
+	case stateConfirmFallback:
+		s := deepStyle.Render("\n ⚠️  OS TRASH FAILED") + "\n\n"
+		s += fmt.Sprintf(" Kessler tried to safely trash %d item(s), but your OS rejected the operation.\n", len(m.failedTrashTargets))
+		s += " This usually happens when clearing items across different drive partitions.\n\n"
+		s += deepStyle.Render(" Do you want to PERMANENTLY NUKE these remaining items? (y/n)") + "\n\n"
+		return s
+		
+	case stateQuitting:
+		return "\n 👋 Orbit clear. Catch you on the next sweep!\n\n"
 	}
 	return ""
 }
