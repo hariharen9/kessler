@@ -64,7 +64,7 @@ brews:
     repository:
       owner: hariharen9
       name: homebrew-tap
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/hariharen9/kessler
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
@@ -80,7 +80,7 @@ scoops:
     repository:
       owner: hariharen9
       name: scoop-bucket
-      token: "{{ .Env.GITHUB_TOKEN }}"
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/hariharen9/kessler
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
     license: MIT
