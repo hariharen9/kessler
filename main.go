@@ -3,7 +3,7 @@ package main
 import (
 	_ "embed"
 
-	"github.com/hariharen/kessler/cmd"
+	"github.com/hariharen9/kessler/cmd"
 )
 
 //go:embed rules.yaml

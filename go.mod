@@ -1,4 +1,4 @@
-module github.com/hariharen/kessler
+module github.com/hariharen9/kessler
 
 go 1.24.3
 

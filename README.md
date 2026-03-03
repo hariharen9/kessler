@@ -28,14 +28,14 @@ Over time, it gets clogged with `node_modules`, stray `build/` folders, forgotte
 ### Homebrew (macOS & Linux)
 
 ```bash
-brew tap hariharen/tap
+brew tap hariharen9/tap
 brew install kessler
 ```
 
 ### Scoop (Windows)
 
 ```powershell
-scoop bucket add hariharen https://github.com/hariharen/scoop-bucket
+scoop bucket add hariharen9 https://github.com/hariharen9/scoop-bucket
 scoop install kessler
 ```
 
@@ -55,7 +55,7 @@ yay -S kessler-bin
 
 ### Debian / Ubuntu (.deb)
 
-Download the `.deb` from the [latest release](https://github.com/hariharen/kessler/releases/latest), then:
+Download the `.deb` from the [latest release](https://github.com/hariharen9/kessler/releases/latest), then:
 
 ```bash
 sudo dpkg -i kessler_*.deb
@@ -64,12 +64,12 @@ sudo dpkg -i kessler_*.deb
 ### Go Install
 
 ```bash
-go install github.com/hariharen/kessler@latest
+go install github.com/hariharen9/kessler@latest
 ```
 
 ### Binary Download
 
-Pre-built binaries for macOS, Linux, and Windows are available on the [Releases](https://github.com/hariharen/kessler/releases) page.
+Pre-built binaries for macOS, Linux, and Windows are available on the [Releases](https://github.com/hariharen9/kessler/releases) page.
 
 ---
 

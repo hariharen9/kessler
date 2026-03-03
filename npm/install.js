@@ -9,7 +9,7 @@ const { Extract } = require("tar") || {};
 
 const pkg = require("./package.json");
 const VERSION = pkg.version;
-const REPO = "hariharen/kessler";
+const REPO = "hariharen9/kessler";
 
 const PLATFORM_MAP = {
     darwin: "darwin",

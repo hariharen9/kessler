@@ -51,7 +51,7 @@ nfpms:
     package_name: kessler
     vendor: hariharen9
     homepage: https://github.com/hariharen9/kessler
-    maintainer: hariharen
+    maintainer: Hariharen S S
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
     license: MIT
     formats:
