@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/hariharen/kessler/internal/tui"
+	"github.com/hariharen9/kessler/internal/tui"
 	"github.com/spf13/cobra"
 )
 

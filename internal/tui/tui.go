@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hariharen/kessler/engine"
+	"github.com/hariharen9/kessler/engine"
 	"github.com/shirou/gopsutil/v3/disk"
 )
 
