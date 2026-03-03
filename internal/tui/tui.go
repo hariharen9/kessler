@@ -52,7 +52,10 @@ type UIModel struct {
 	height             int
 	failedTrashCount   int
 	failedTrashTargets []string
-	
+
+	// Configuration
+	rulesData []byte
+
 	// Progress tracking for animated cleaning
 	totalToClean    int
 	cleanedCount    int
@@ -96,7 +99,7 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func InitialModel(scanPath string, includeDeep bool) UIModel {
+func InitialModel(scanPath string, includeDeep bool, rulesData []byte) UIModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -114,6 +117,7 @@ func InitialModel(scanPath string, includeDeep bool) UIModel {
 		scanPath:    scanPath,
 		sortMode:    SortSize,
 		includeDeep: includeDeep,
+		rulesData:   rulesData,
 	}
 }
 
@@ -123,7 +127,7 @@ func (m UIModel) Init() tea.Cmd {
 
 func (m UIModel) startScan() tea.Cmd {
 	return func() tea.Msg {
-		scanner, err := engine.NewScanner()
+		scanner, err := engine.NewScanner(m.rulesData)
 		if err != nil {
 			return err
 		}
@@ -236,6 +240,7 @@ type cleanResult struct {
 	freedSpace         int64
 	failedTrashTargets []string
 }
+
 // getFilteredProjects applies the search filter, the tier filter, and the sorting
 func (m UIModel) getFilteredProjects() []engine.Project {
 	var filtered []engine.Project
@@ -415,7 +420,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.failedTrashTargets = append(m.failedTrashTargets, msg.artifact.Path)
 		}
 		m.cleanedCount++
-		
+
 		if msg.isFallback {
 			return m, m.cleanNextFallback()
 		}
@@ -504,7 +509,7 @@ func (m UIModel) View() string {
 
 		// Build Left Pane
 		var leftContent strings.Builder
-		leftContent.WriteString(titleStyle.Render("🚀 KESSLER: COMMAND CENTER") + "\n\n")
+		leftContent.WriteString(titleStyle.Render("🚀 KESSLER: Clear the Debris") + "\n\n")
 		leftContent.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
 		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s | Mode: %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText))
 
@@ -693,28 +698,28 @@ func (m UIModel) View() string {
 		if m.permanent {
 			msg = "Permanently nuking debris (No undo!)..."
 		}
-		
+
 		// Progress bar
 		width := 40
 		if m.width > 0 && m.width < 50 {
 			width = m.width - 10
 		}
-		
+
 		progress := float64(m.cleanedCount) / float64(m.totalToClean)
 		filled := int(progress * float64(width))
 		if filled > width {
 			filled = width
 		}
-		
+
 		bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 		coloredBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(bar)
-		
+
 		// Truncate current cleaning path
 		current := m.currentCleaning
 		if len(current) > 50 {
 			current = "..." + current[len(current)-47:]
 		}
-		
+
 		return fmt.Sprintf(
 			"\n 🧹 Firing orbital lasers...\n\n %s\n\n %s [%d/%d]\n\n Vaporizing: %s\n",
 			msg,

@@ -2,7 +2,6 @@ package engine
 
 import (
 	"bytes"
-	_ "embed"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -12,16 +11,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed default_rules.yaml
-var defaultRules []byte
-
 type Scanner struct {
 	Config Config
 }
 
-func NewScanner() (*Scanner, error) {
+func NewScanner(rulesData []byte) (*Scanner, error) {
 	var config Config
-	if err := yaml.Unmarshal(defaultRules, &config); err != nil {
+	if err := yaml.Unmarshal(rulesData, &config); err != nil {
 		return nil, err
 	}
 
