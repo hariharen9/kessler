@@ -22,6 +22,7 @@ type state int
 const (
 	stateScanning state = iota
 	stateResults
+	stateConfirmNuke
 	stateCleaning
 	stateConfirmFallback
 	stateDone
@@ -56,6 +57,9 @@ type UIModel struct {
 
 	// Preview modal
 	showPreviewModal bool
+
+	// Post-clean feedback
+	lastFreedSpace int64
 
 	// Configuration
 	rulesData     []byte
@@ -374,6 +378,19 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.state == stateConfirmNuke {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				m.state = stateCleaning
+				m.permanent = true
+				return m, m.startCleaning()
+			case "n", "esc", "q":
+				m.state = stateResults
+				return m, nil
+			}
+			return m, nil
+		}
+
 		if m.state == stateConfirmFallback {
 			switch strings.ToLower(msg.String()) {
 			case "y":
@@ -473,11 +490,10 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.permanent = false
 				return m, m.startCleaning()
 			}
-		case "X": // Capital X for Nuke
+		case "X": // Capital X for Nuke — show confirmation first
 			if m.state == stateResults && len(m.selected) > 0 {
-				m.state = stateCleaning
-				m.permanent = true
-				return m, m.startCleaning()
+				m.state = stateConfirmNuke
+				return m, nil
 			}
 		}
 
@@ -502,6 +518,18 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects = msg.projects
 		m.state = stateResults
+
+		// Save scan to history
+		var totalSize int64
+		for _, p := range msg.projects {
+			totalSize += p.TotalSize
+		}
+		engine.SaveEntry(engine.ScanHistoryEntry{
+			Timestamp:    time.Now(),
+			ScanPath:     m.scanPath,
+			ProjectCount: len(msg.projects),
+			TotalSize:    totalSize,
+		})
 		return m, nil
 
 	case cleanStepMsg:
@@ -525,13 +553,24 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateConfirmFallback
 			return m, nil
 		}
-		m.state = stateDone
-		return m, tea.Quit
+		m.lastFreedSpace = m.freedSpace
+		m.freedSpace = 0
+		m.selected = make(map[string]struct{})
+		m.cursor = 0
+		m.cleanedCount = 0
+		m.totalToClean = 0
+		m.state = stateScanning
+		return m, m.startScan()
 
 	case int64: // Finished fallback cleaning
-		m.freedSpace += msg
-		m.state = stateDone
-		return m, tea.Quit
+		m.lastFreedSpace = m.freedSpace + msg
+		m.freedSpace = 0
+		m.selected = make(map[string]struct{})
+		m.cursor = 0
+		m.cleanedCount = 0
+		m.totalToClean = 0
+		m.state = stateScanning
+		return m, m.startScan()
 
 	case error:
 		fmt.Println("Error:", msg)
@@ -592,6 +631,25 @@ func (m UIModel) View() string {
 			latestProj = "—"
 		}
 
+		// Scan history line
+		var historyLine string
+		history := engine.LoadHistory()
+		if last := history.LastEntry(); last != nil {
+			ago := time.Since(last.Timestamp)
+			var agoStr string
+			if ago.Hours() < 1 {
+				agoStr = fmt.Sprintf("%dm ago", int(ago.Minutes()))
+			} else if ago.Hours() < 24 {
+				agoStr = fmt.Sprintf("%dh ago", int(ago.Hours()))
+			} else {
+				agoStr = fmt.Sprintf("%dd ago", int(ago.Hours()/24))
+			}
+			historyLine = fmt.Sprintf("\n  📜 Last scan  : %s — %d projects, %s",
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(agoStr),
+				last.ProjectCount,
+				formatBytes(last.TotalSize))
+		}
+
 		scanBox := lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#7D56F4")).
@@ -604,7 +662,7 @@ func (m UIModel) View() string {
 					"  📂 Dirs checked: %s\n"+
 					"  🔭 Projects    : %s\n"+
 					"  💾 Debris found: %s\n"+
-					"  🚀 Latest      : %s\n"+
+					"  🚀 Latest      : %s%s\n"+
 					"\n"+
 					"  %s",
 				m.spinner.View(),
@@ -613,6 +671,7 @@ func (m UIModel) View() string {
 				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render(fmt.Sprintf("%d", m.scanProjectsFound)),
 				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(m.scanTotalSize)),
 				lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(latestProj),
+				historyLine,
 				quoteStyled,
 			))
 
@@ -646,6 +705,13 @@ func (m UIModel) View() string {
 		// Build Left Pane
 		var leftContent strings.Builder
 		leftContent.WriteString(titleStyle.Render("🚀 KESSLER: Clear the Debris") + "\n\n")
+
+		// Show freed space banner from last clean
+		if m.lastFreedSpace > 0 {
+			freedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Bold(true).Render(
+				fmt.Sprintf(" ✨ Freed %s in the last sweep!", formatBytes(m.lastFreedSpace)))
+			leftContent.WriteString(freedBanner + "\n\n")
+		}
 		leftContent.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
 		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s | Mode: %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText))
 
@@ -695,12 +761,29 @@ func (m UIModel) View() string {
 					}
 				}
 
+				// Sparkline: show relative size bar
+				var maxSize int64
+				for _, fp := range filtered {
+					if fp.TotalSize > maxSize {
+						maxSize = fp.TotalSize
+					}
+				}
+				sparkWidth := 8
+				var sparkFilled int
+				if maxSize > 0 {
+					sparkFilled = int(float64(proj.TotalSize) / float64(maxSize) * float64(sparkWidth))
+				}
+				if sparkFilled < 1 && proj.TotalSize > 0 {
+					sparkFilled = 1
+				}
+				sparkBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(strings.Repeat("█", sparkFilled)) + strings.Repeat("░", sparkWidth-sparkFilled)
+
 				// We want a clean columnar look. Format it with padding.
 				baseNamePadded := fmt.Sprintf("%-26s", baseName)
 				timeStrPadded := fmt.Sprintf("[%5s]", timeStr)
 				sizeStr := formatBytes(proj.TotalSize)
 
-				line := fmt.Sprintf("%s [%s] %s %s %s %s - %s", cursor, checked, getIcon(proj.Type), baseNamePadded, timeStrPadded, proj.Type, sizeStr)
+				line := fmt.Sprintf("%s [%s] %s %s %s %s %s - %s", cursor, checked, getIcon(proj.Type), baseNamePadded, sparkBar, timeStrPadded, proj.Type, sizeStr)
 
 				if _, ok := m.selected[proj.Path]; ok {
 					leftContent.WriteString(selectedStyle.Render(line) + "\n")
@@ -708,6 +791,11 @@ func (m UIModel) View() string {
 					leftContent.WriteString(itemStyle.Render(line) + "\n")
 				}
 			}
+		}
+		// Full project path tooltip
+		if len(filtered) > 0 && m.cursor < len(filtered) {
+			fullPath := filtered[m.cursor].Path
+			leftContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(fmt.Sprintf("\n 📍 %s", fullPath)) + "\n")
 		}
 		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   i: ignored   •   s: sort   •   /: search   •   p: preview   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
 
@@ -918,6 +1006,45 @@ func (m UIModel) View() string {
 		}
 
 		return mainView
+
+	case stateConfirmNuke:
+		var nukeSize int64
+		var nukeCount int
+		for _, proj := range m.projects {
+			if _, ok := m.selected[proj.Path]; ok {
+				for _, a := range proj.Artifacts {
+					if !m.includeDeep && a.Tier == engine.TierDeep {
+						continue
+					}
+					if !m.showIgnored && a.Tier == engine.TierIgnored {
+						continue
+					}
+					nukeSize += a.Size
+					nukeCount++
+				}
+			}
+		}
+
+		nukeBox := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("#FF5C5C")).
+			Padding(1, 3).
+			Width(55).
+			Render(fmt.Sprintf(
+				"%s\n\n"+
+					"  You are about to PERMANENTLY DELETE:\n\n"+
+					"  • %d artifacts from %d projects\n"+
+					"  • Total size: %s\n\n"+
+					"  ⚠️  This CANNOT be undone. Files will NOT go to Trash.\n\n"+
+					"  %s",
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render("☢️  CONFIRM PERMANENT NUKE"),
+				nukeCount,
+				len(m.selected),
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(nukeSize)),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("Press y to confirm, n to cancel"),
+			))
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, nukeBox)
 
 	case stateCleaning:
 		msg := "Safely moving debris to Trash Bin..."
