@@ -135,6 +135,128 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 	return projects, err
 }
 
+// ScanProgress reports live scanning progress.
+type ScanProgress struct {
+	DirsChecked   int
+	ProjectsFound int
+	CurrentDir    string
+	LatestProject string
+	TotalSize     int64
+}
+
+// ScanWithProgress is like Scan but sends progress updates through a channel.
+func (s *Scanner) ScanWithProgress(root string, progress chan<- ScanProgress) ([]Project, error) {
+	var projects []Project
+	var dirsChecked int
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if !d.IsDir() {
+			return nil
+		}
+
+		dirsChecked++
+
+		for _, rule := range s.Config.Rules {
+			for _, target := range rule.Targets {
+				if d.Name() == target.Path {
+					return filepath.SkipDir
+				}
+			}
+		}
+
+		// Send progress update every 50 directories to avoid channel overhead
+		if dirsChecked%50 == 0 {
+			var totalSize int64
+			for _, p := range projects {
+				totalSize += p.TotalSize
+			}
+			progress <- ScanProgress{
+				DirsChecked:   dirsChecked,
+				ProjectsFound: len(projects),
+				CurrentDir:    path,
+				TotalSize:     totalSize,
+			}
+		}
+
+		matchedRule := s.matchRule(path)
+		if matchedRule != nil {
+			project := Project{
+				Path: path,
+				Type: matchedRule.Name,
+			}
+
+			for _, target := range matchedRule.Targets {
+				isDangerous := false
+				for _, dangerItem := range s.Config.DangerZone {
+					if target.Path == dangerItem {
+						isDangerous = true
+						break
+					}
+				}
+				if isDangerous {
+					continue
+				}
+
+				targetPath := filepath.Join(path, target.Path)
+				if info, err := os.Stat(targetPath); err == nil {
+					if s.isTrackedByGit(path, targetPath) {
+						continue
+					}
+
+					size, modTime := s.calculateSizeAndModTime(targetPath, info)
+					if size > 0 {
+						project.Artifacts = append(project.Artifacts, Artifact{
+							Path:    targetPath,
+							Size:    size,
+							Tier:    target.Tier,
+							ModTime: modTime,
+						})
+						project.TotalSize += size
+
+						if project.LastModTime.IsZero() || modTime.After(project.LastModTime) {
+							project.LastModTime = modTime
+						}
+					}
+				}
+			}
+
+			ignoredArtifacts := s.scanGitIgnored(path, project.Artifacts)
+			project.Artifacts = append(project.Artifacts, ignoredArtifacts...)
+			for _, a := range ignoredArtifacts {
+				project.TotalSize += a.Size
+				if project.LastModTime.IsZero() || a.ModTime.After(project.LastModTime) {
+					project.LastModTime = a.ModTime
+				}
+			}
+
+			if len(project.Artifacts) > 0 {
+				projects = append(projects, project)
+
+				// Send immediate update when a project is found
+				var totalSize int64
+				for _, p := range projects {
+					totalSize += p.TotalSize
+				}
+				progress <- ScanProgress{
+					DirsChecked:   dirsChecked,
+					ProjectsFound: len(projects),
+					CurrentDir:    path,
+					LatestProject: filepath.Base(path),
+					TotalSize:     totalSize,
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return projects, err
+}
+
 func (s *Scanner) matchRule(dir string) *Rule {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

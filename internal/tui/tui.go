@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"sort"
@@ -53,6 +54,9 @@ type UIModel struct {
 	failedTrashCount   int
 	failedTrashTargets []string
 
+	// Preview modal
+	showPreviewModal bool
+
 	// Configuration
 	rulesData     []byte
 	userRulesData []byte
@@ -62,6 +66,14 @@ type UIModel struct {
 	cleanedCount    int
 	currentCleaning string
 	cleaningQueue   []engine.Artifact
+
+	// Live scanning progress
+	scanDirsChecked   int
+	scanProjectsFound int
+	scanCurrentDir    string
+	scanLatestProject string
+	scanTotalSize     int64
+	scanQuoteIndex    int
 }
 
 type cleanStepMsg struct {
@@ -112,15 +124,16 @@ func InitialModel(scanPath string, includeDeep bool, rulesData []byte, userRules
 	ti.Width = 40
 
 	return UIModel{
-		spinner:       s,
-		textInput:     ti,
-		state:         stateScanning,
-		selected:      make(map[string]struct{}),
-		scanPath:      scanPath,
-		sortMode:      SortSize,
-		includeDeep:   includeDeep,
-		rulesData:     rulesData,
-		userRulesData: userRulesData,
+		spinner:        s,
+		textInput:      ti,
+		state:          stateScanning,
+		selected:       make(map[string]struct{}),
+		scanPath:       scanPath,
+		sortMode:       SortSize,
+		includeDeep:    includeDeep,
+		rulesData:      rulesData,
+		userRulesData:  userRulesData,
+		scanQuoteIndex: rand.Intn(len(spaceQuotes)),
 	}
 }
 
@@ -128,18 +141,61 @@ func (m UIModel) Init() tea.Cmd {
 	return tea.Batch(m.spinner.Tick, m.startScan())
 }
 
+type scanComplete struct {
+	projects []engine.Project
+	err      error
+}
+
+// scanProgressMsg wraps progress + the channel for the next read
+type scanProgressMsg struct {
+	engine.ScanProgress
+	ch chan tea.Msg
+}
+
+var spaceQuotes = []string{
+	"Space debris travels at 17,500 mph. Your node_modules aren't far behind.",
+	"Houston, we have a storage problem.",
+	"One small sweep for dev, one giant save for disk space.",
+	"In space, no one can hear your SSD scream.",
+	"The universe is expanding. So is your build folder.",
+	"Ground control to Major Dev... your disk is 87% full.",
+	"Ad astra per aspera — through junk to the stars.",
+	"That's one small delete for man, one giant cleanup for mankind.",
+}
+
 func (m UIModel) startScan() tea.Cmd {
-	return func() tea.Msg {
+	ch := make(chan tea.Msg, 50)
+
+	go func() {
 		scanner, err := engine.NewScannerMerged(m.rulesData, m.userRulesData)
 		if err != nil {
-			return err
+			ch <- scanComplete{err: err}
+			return
 		}
-		m.scanner = scanner
-		projects, err := scanner.Scan(m.scanPath)
-		if err != nil {
-			return err
+
+		progress := make(chan engine.ScanProgress, 10)
+		var projects []engine.Project
+		var scanErr error
+
+		go func() {
+			projects, scanErr = scanner.ScanWithProgress(m.scanPath, progress)
+			close(progress)
+		}()
+
+		for p := range progress {
+			ch <- scanProgressMsg{ScanProgress: p, ch: ch}
 		}
-		return projects
+
+		ch <- scanComplete{projects: projects, err: scanErr}
+	}()
+
+	return waitForProgress(ch)
+}
+
+// waitForProgress reads one message from the channel and returns it
+func waitForProgress(ch chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		return <-ch
 	}
 }
 
@@ -370,6 +426,10 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showIgnored = !m.showIgnored
 				m.cursor = 0
 			}
+		case "p": // Toggle preview modal
+			if m.state == stateResults {
+				m.showPreviewModal = !m.showPreviewModal
+			}
 		case " ": // Toggle selection
 			if m.state == stateResults {
 				filtered := m.getFilteredProjects()
@@ -423,6 +483,24 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case []engine.Project:
 		m.projects = msg
+		m.state = stateResults
+		return m, nil
+
+	case scanProgressMsg:
+		m.scanDirsChecked = msg.DirsChecked
+		m.scanProjectsFound = msg.ProjectsFound
+		m.scanCurrentDir = msg.CurrentDir
+		m.scanTotalSize = msg.TotalSize
+		if msg.LatestProject != "" {
+			m.scanLatestProject = msg.LatestProject
+		}
+		return m, waitForProgress(msg.ch)
+
+	case scanComplete:
+		if msg.err != nil {
+			return m, tea.Quit
+		}
+		m.projects = msg.projects
 		m.state = stateResults
 		return m, nil
 
@@ -500,7 +578,48 @@ func getIcon(projectType string) string {
 func (m UIModel) View() string {
 	switch m.state {
 	case stateScanning:
-		return fmt.Sprintf("\n %s Scanning %s and verifying Git status...\n\n", m.spinner.View(), m.scanPath)
+		// Truncate current dir for display
+		shortDir := m.scanCurrentDir
+		if len(shortDir) > 45 {
+			shortDir = "..." + shortDir[len(shortDir)-42:]
+		}
+
+		quote := spaceQuotes[m.scanQuoteIndex]
+		quoteStyled := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render("\"" + quote + "\"")
+
+		latestProj := m.scanLatestProject
+		if latestProj == "" {
+			latestProj = "—"
+		}
+
+		scanBox := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#7D56F4")).
+			Padding(1, 3).
+			Width(60).
+			Render(fmt.Sprintf(
+				"%s  Scanning orbital debris...\n"+
+					"\n"+
+					"  📡 Path       : %s\n"+
+					"  📂 Dirs checked: %s\n"+
+					"  🔭 Projects    : %s\n"+
+					"  💾 Debris found: %s\n"+
+					"  🚀 Latest      : %s\n"+
+					"\n"+
+					"  %s",
+				m.spinner.View(),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(m.scanPath),
+				lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%d", m.scanDirsChecked)),
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render(fmt.Sprintf("%d", m.scanProjectsFound)),
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(m.scanTotalSize)),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(latestProj),
+				quoteStyled,
+			))
+
+		banner := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4")).Render(
+			"  🛰️  K E S S L E R")
+
+		return fmt.Sprintf("\n%s\n\n%s\n", banner, scanBox)
 
 	case stateResults:
 		filtered := m.getFilteredProjects()
@@ -534,8 +653,13 @@ func (m UIModel) View() string {
 			leftContent.WriteString(" No project artifacts match the current filters. Orbit is clear!\n")
 		} else {
 			for i, proj := range filtered {
-				// Pagination
-				if i < m.cursor-5 || i > m.cursor+10 {
+				// Dynamic pagination based on terminal height
+				visibleRows := m.height - 12 // subtract header, footer, search, summary lines
+				if visibleRows < 5 {
+					visibleRows = 5
+				}
+				halfVisible := visibleRows / 2
+				if i < m.cursor-halfVisible || i > m.cursor+halfVisible {
 					continue
 				}
 
@@ -585,7 +709,7 @@ func (m UIModel) View() string {
 				}
 			}
 		}
-		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   i: ignored   •   s: sort   •   /: search   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
+		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   i: ignored   •   s: sort   •   /: search   •   p: preview   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
 
 		// Build Right Pane (Stats)
 		var rightContent strings.Builder
@@ -677,12 +801,31 @@ func (m UIModel) View() string {
 			rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 TARGET PREVIEW") + "\n\n")
 			rightContent.WriteString(fmt.Sprintf("%s %s\n", getIcon(activeProj.Type), filepath.Base(activeProj.Path)))
 
+			// Collect visible artifacts
+			var visibleArtifacts []engine.Artifact
 			for _, artifact := range activeProj.Artifacts {
 				if !m.includeDeep && artifact.Tier == engine.TierDeep {
 					continue
 				}
 				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
 					continue
+				}
+				visibleArtifacts = append(visibleArtifacts, artifact)
+			}
+
+			// Limit preview height based on terminal (leave room for header/footer/stats)
+			maxPreviewItems := m.height - 30
+			if maxPreviewItems < 3 {
+				maxPreviewItems = 3
+			}
+
+			for i, artifact := range visibleArtifacts {
+				if i >= maxPreviewItems {
+					remaining := len(visibleArtifacts) - maxPreviewItems
+					rightContent.WriteString(fmt.Sprintf(" └─ %s\n",
+						lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(
+							fmt.Sprintf("+%d more items (press p to expand)", remaining))))
+					break
 				}
 
 				tierColor := lipgloss.Color("#04B575") // Safe Green
@@ -718,7 +861,63 @@ func (m UIModel) View() string {
 
 		leftPaneContent := lipgloss.NewStyle().Width(leftPaneWidth).Render(leftContent.String())
 
-		return paneStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, leftPaneContent, statsBox))
+		mainView := paneStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, leftPaneContent, statsBox))
+
+		// Preview Modal Overlay
+		if m.showPreviewModal && len(filtered) > 0 && m.cursor < len(filtered) {
+			activeProj := filtered[m.cursor]
+			var modalContent strings.Builder
+			modalContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 FULL PREVIEW — "+filepath.Base(activeProj.Path)) + "\n")
+			modalContent.WriteString(fmt.Sprintf("%s %s  •  %s\n\n", getIcon(activeProj.Type), activeProj.Type, formatBytes(activeProj.TotalSize)))
+
+			for _, artifact := range activeProj.Artifacts {
+				if !m.includeDeep && artifact.Tier == engine.TierDeep {
+					continue
+				}
+				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
+					continue
+				}
+
+				tierColor := lipgloss.Color("#04B575")
+				tierLabel := ""
+				if artifact.Tier == engine.TierDeep {
+					tierColor = lipgloss.Color("#E5C07B")
+					tierLabel = " [deep]"
+				} else if artifact.Tier == engine.TierDanger {
+					tierColor = lipgloss.Color("#FF5C5C")
+					tierLabel = " [danger]"
+				} else if artifact.Tier == engine.TierIgnored {
+					tierColor = lipgloss.Color("#E5C07B")
+					tierLabel = " [user ignored]"
+				}
+
+				coloredLabel := lipgloss.NewStyle().Foreground(tierColor).Render(tierLabel)
+				modalContent.WriteString(fmt.Sprintf("  ├─ %-40s  %8s%s\n", filepath.Base(artifact.Path), formatBytes(artifact.Size), coloredLabel))
+			}
+
+			modalContent.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render("  press p to close"))
+
+			modalWidth := m.width - 10
+			if modalWidth < 50 {
+				modalWidth = 50
+			}
+			modalHeight := m.height - 6
+			if modalHeight < 10 {
+				modalHeight = 10
+			}
+
+			modalBox := lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(lipgloss.Color("#7D56F4")).
+				Padding(1, 2).
+				Width(modalWidth).
+				MaxHeight(modalHeight).
+				Render(modalContent.String())
+
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
+		}
+
+		return mainView
 
 	case stateCleaning:
 		msg := "Safely moving debris to Trash Bin..."
