@@ -29,7 +29,7 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil 
+			return nil
 		}
 
 		if !d.IsDir() {
@@ -82,7 +82,7 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 							ModTime: modTime,
 						})
 						project.TotalSize += size
-						
+
 						// Update project's last modified time
 						if project.LastModTime.IsZero() || modTime.After(project.LastModTime) {
 							project.LastModTime = modTime
@@ -149,12 +149,12 @@ func (s *Scanner) calculateSizeAndModTime(path string, info fs.FileInfo) (int64,
 		}
 		return nil
 	})
-	
+
 	// If empty directory, just return the directory's modtime
 	if latestModTime.IsZero() {
 		latestModTime = info.ModTime()
 	}
-	
+
 	return size, latestModTime
 }
 
@@ -170,4 +170,53 @@ func (s *Scanner) isTrackedByGit(projectRoot, artifactPath string) bool {
 	}
 	// If the output contains text, it means Git is tracking something inside this folder!
 	return len(bytes.TrimSpace(out)) > 0
+}
+
+// FilterOptions controls post-scan filtering for non-interactive mode.
+type FilterOptions struct {
+	IncludeDeep bool
+	MinSize     int64         // bytes, 0 = no filter
+	OlderThan   time.Duration // 0 = no filter
+}
+
+// FilterProjects applies tier, min-size, and older-than filters on scanned projects.
+// It recalculates TotalSize per project based on the active tier.
+func FilterProjects(projects []Project, opts FilterOptions) []Project {
+	var filtered []Project
+
+	for _, p := range projects {
+		var activeSize int64
+		var activeArtifacts []Artifact
+
+		for _, a := range p.Artifacts {
+			if !opts.IncludeDeep && a.Tier == TierDeep {
+				continue
+			}
+			activeSize += a.Size
+			activeArtifacts = append(activeArtifacts, a)
+		}
+
+		// Skip projects with no matching artifacts
+		if activeSize == 0 {
+			continue
+		}
+
+		// Apply min-size filter
+		if opts.MinSize > 0 && activeSize < opts.MinSize {
+			continue
+		}
+
+		// Apply older-than filter (skip projects that are too recent)
+		if opts.OlderThan > 0 && !p.LastModTime.IsZero() {
+			if time.Since(p.LastModTime) < opts.OlderThan {
+				continue
+			}
+		}
+
+		p.TotalSize = activeSize
+		p.Artifacts = activeArtifacts
+		filtered = append(filtered, p)
+	}
+
+	return filtered
 }
