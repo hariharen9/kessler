@@ -25,20 +25,51 @@ Over time, it gets clogged with `node_modules`, stray `build/` folders, forgotte
 
 ## 🚀 Installation
 
-You can install Kessler directly using Go:
+### Homebrew (macOS & Linux)
+
+```bash
+brew tap hariharen/tap
+brew install kessler
+```
+
+### Scoop (Windows)
+
+```powershell
+scoop bucket add hariharen https://github.com/hariharen/scoop-bucket
+scoop install kessler
+```
+
+### npm (All platforms)
+
+```bash
+npm install -g kessler
+# or use without installing
+npx kessler ~/Projects
+```
+
+### AUR (Arch Linux)
+
+```bash
+yay -S kessler-bin
+```
+
+### Debian / Ubuntu (.deb)
+
+Download the `.deb` from the [latest release](https://github.com/hariharen/kessler/releases/latest), then:
+
+```bash
+sudo dpkg -i kessler_*.deb
+```
+
+### Go Install
 
 ```bash
 go install github.com/hariharen/kessler@latest
 ```
 
-Or clone and build it manually:
+### Binary Download
 
-```bash
-git clone https://github.com/hariharen/kessler.git
-cd kessler
-go build -o kessler
-sudo mv kessler /usr/local/bin/
-```
+Pre-built binaries for macOS, Linux, and Windows are available on the [Releases](https://github.com/hariharen/kessler/releases) page.
 
 ---
 

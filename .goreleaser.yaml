@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: kessler
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: kessler
+    main: .
+    binary: kessler
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# DEB packages for Debian/Ubuntu
+nfpms:
+  - id: deb
+    package_name: kessler
+    vendor: hariharen
+    homepage: https://github.com/hariharen/kessler
+    maintainer: hariharen
+    description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
+    license: MIT
+    formats:
+      - deb
+    bindir: /usr/local/bin
+
+# Homebrew tap
+brews:
+  - name: kessler
+    repository:
+      owner: hariharen
+      name: homebrew-tap
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/hariharen/kessler
+    description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
+    license: MIT
+    install: |
+      bin.install "kessler"
+    test: |
+      system "#{bin}/kessler", "--help"
+
+# Scoop bucket (Windows)
+scoops:
+  - name: kessler
+    repository:
+      owner: hariharen
+      name: scoop-bucket
+      token: "{{ .Env.GITHUB_TOKEN }}"
+    homepage: https://github.com/hariharen/kessler
+    description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
+    license: MIT
+
+release:
+  github:
+    owner: hariharen
+    name: kessler
+  name_template: "v{{.Version}}"
+  draft: false
+  prerelease: auto

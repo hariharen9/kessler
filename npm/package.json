@@ -1,0 +1,30 @@
+{
+  "name": "kessler",
+  "version": "0.1.0",
+  "description": "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches",
+  "keywords": [
+    "cleanup",
+    "node_modules",
+    "build-artifacts",
+    "disk-space",
+    "cli",
+    "devtools"
+  ],
+  "homepage": "https://github.com/hariharen/kessler",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hariharen/kessler.git"
+  },
+  "license": "MIT",
+  "author": "hariharen",
+  "bin": {
+    "kessler": "bin/kessler"
+  },
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "files": [
+    "bin/",
+    "install.js"
+  ]
+}
