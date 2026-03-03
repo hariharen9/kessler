@@ -13,7 +13,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hariharen/kessler/engine"
-	"github.com/laurent22/go-trash"
 	"github.com/shirou/gopsutil/v3/disk"
 )
 
@@ -191,7 +190,7 @@ func (m *UIModel) cleanNext() tea.Cmd {
 		} else {
 			absPath, pathErr := filepath.Abs(artifact.Path)
 			if pathErr == nil {
-				_, err = trash.MoveToTrash(absPath)
+				err = engine.MoveToTrash(absPath)
 			} else {
 				err = pathErr
 			}

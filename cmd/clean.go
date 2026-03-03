@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/hariharen/kessler/engine"
-	"github.com/laurent22/go-trash"
 	"github.com/spf13/cobra"
 )
 
@@ -170,7 +169,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		} else {
 			absPath, pathErr := filepath.Abs(a.Path)
 			if pathErr == nil {
-				_, delErr = trash.MoveToTrash(absPath)
+				delErr = engine.MoveToTrash(absPath)
 			} else {
 				delErr = pathErr
 			}
