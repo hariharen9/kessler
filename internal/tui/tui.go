@@ -36,6 +36,14 @@ const (
 	SortName
 )
 
+type tabIndex int
+
+const (
+	tabProjects tabIndex = iota
+	tabGlobal
+	tabHistory
+)
+
 type UIModel struct {
 	scanner            *engine.Scanner
 	projects           []engine.Project
@@ -78,12 +86,34 @@ type UIModel struct {
 	scanLatestProject string
 	scanTotalSize     int64
 	scanQuoteIndex    int
+
+	// Tab navigation
+	activeTab tabIndex
+
+	// Global caches (Tab 2)
+	globalCaches       []engine.GlobalCache
+	globalSelected     map[int]struct{}
+	globalCursor       int
+	globalScanning     bool
+	globalProcessed    int
+	globalTotal        int
+	globalCurrentCache string
+	globalTotalSize    int64
 }
 
 type cleanStepMsg struct {
 	artifact   engine.Artifact
 	err        error
 	isFallback bool
+}
+
+type globalScanResult struct {
+	caches []engine.GlobalCache
+}
+
+type globalScanProgressMsg struct {
+	engine.GlobalScanProgress
+	ch chan tea.Msg
 }
 
 var (
@@ -132,6 +162,7 @@ func InitialModel(scanPath string, includeDeep bool, rulesData []byte, userRules
 		textInput:      ti,
 		state:          stateScanning,
 		selected:       make(map[string]struct{}),
+		globalSelected: make(map[int]struct{}),
 		scanPath:       scanPath,
 		sortMode:       SortSize,
 		includeDeep:    includeDeep,
@@ -191,6 +222,28 @@ func (m UIModel) startScan() tea.Cmd {
 		}
 
 		ch <- scanComplete{projects: projects, err: scanErr}
+	}()
+
+	return waitForProgress(ch)
+}
+
+func (m UIModel) scanGlobalCachesCmd() tea.Cmd {
+	ch := make(chan tea.Msg, 50)
+
+	go func() {
+		progress := make(chan engine.GlobalScanProgress, 10)
+		var caches []engine.GlobalCache
+
+		go func() {
+			caches = engine.ScanGlobalCachesWithProgress(progress)
+			close(progress)
+		}()
+
+		for p := range progress {
+			ch <- globalScanProgressMsg{GlobalScanProgress: p, ch: ch}
+		}
+
+		ch <- globalScanResult{caches: caches}
 	}()
 
 	return waitForProgress(ch)
@@ -381,6 +434,24 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == stateConfirmNuke {
 			switch strings.ToLower(msg.String()) {
 			case "y":
+				if m.activeTab == tabGlobal {
+					// Execute global cache cleaning
+					var freedSpace int64
+					for idx := range m.globalSelected {
+						if idx < len(m.globalCaches) {
+							cache := m.globalCaches[idx]
+							freedSpace += cache.Size
+							engine.CleanGlobalCache(cache)
+							engine.SaveCleanEntry(cache.Name, cache.Size)
+						}
+					}
+					m.lastFreedSpace = freedSpace
+					m.globalSelected = make(map[int]struct{})
+					m.globalCursor = 0
+					m.globalScanning = true
+					m.state = stateResults
+					return m, m.scanGlobalCachesCmd()
+				}
 				m.state = stateCleaning
 				m.permanent = true
 				return m, m.startCleaning()
@@ -409,14 +480,20 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateQuitting
 			return m, tea.Quit
 		case "up", "k":
-			if m.state == stateResults && m.cursor > 0 {
+			if m.state == stateResults && m.activeTab == tabProjects && m.cursor > 0 {
 				m.cursor--
+			} else if m.state == stateResults && m.activeTab == tabGlobal && m.globalCursor > 0 {
+				m.globalCursor--
 			}
 		case "down", "j":
-			if m.state == stateResults {
+			if m.state == stateResults && m.activeTab == tabProjects {
 				filtered := m.getFilteredProjects()
 				if m.cursor < len(filtered)-1 {
 					m.cursor++
+				}
+			} else if m.state == stateResults && m.activeTab == tabGlobal {
+				if m.globalCursor < len(m.globalCaches)-1 {
+					m.globalCursor++
 				}
 			}
 		case "/":
@@ -448,7 +525,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showPreviewModal = !m.showPreviewModal
 			}
 		case " ": // Toggle selection
-			if m.state == stateResults {
+			if m.state == stateResults && m.activeTab == tabProjects {
 				filtered := m.getFilteredProjects()
 				if len(filtered) > 0 && m.cursor < len(filtered) {
 					path := filtered[m.cursor].Path
@@ -458,9 +535,17 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selected[path] = struct{}{}
 					}
 				}
+			} else if m.state == stateResults && m.activeTab == tabGlobal {
+				if m.globalCursor < len(m.globalCaches) {
+					if _, ok := m.globalSelected[m.globalCursor]; ok {
+						delete(m.globalSelected, m.globalCursor)
+					} else {
+						m.globalSelected[m.globalCursor] = struct{}{}
+					}
+				}
 			}
 		case "a": // Select all visible
-			if m.state == stateResults {
+			if m.state == stateResults && m.activeTab == tabProjects {
 				filtered := m.getFilteredProjects()
 				allSelected := true
 
@@ -485,17 +570,58 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "enter":
-			if m.state == stateResults && len(m.selected) > 0 {
+			if m.state == stateResults && m.activeTab == tabProjects && len(m.selected) > 0 {
 				m.state = stateCleaning
 				m.permanent = false
 				return m, m.startCleaning()
+			} else if m.state == stateResults && m.activeTab == tabGlobal && len(m.globalSelected) > 0 {
+				// Show confirmation for global cleaning
+				m.state = stateConfirmNuke // Reuse nuke confirmation with global context
+				m.permanent = false
+				return m, nil
 			}
 		case "X": // Capital X for Nuke — show confirmation first
-			if m.state == stateResults && len(m.selected) > 0 {
+			if m.state == stateResults && m.activeTab == tabProjects && len(m.selected) > 0 {
 				m.state = stateConfirmNuke
 				return m, nil
 			}
+		case "1":
+			if m.state == stateResults {
+				m.activeTab = tabProjects
+			}
+		case "2":
+			if m.state == stateResults {
+				m.activeTab = tabGlobal
+				if m.globalCaches == nil && !m.globalScanning {
+					m.globalScanning = true
+					return m, m.scanGlobalCachesCmd()
+				}
+			}
+		case "3":
+			if m.state == stateResults {
+				m.activeTab = tabHistory
+			}
+		case "tab":
+			if m.state == stateResults {
+				m.activeTab = (m.activeTab + 1) % 3
+				if m.activeTab == tabGlobal && m.globalCaches == nil && !m.globalScanning {
+					m.globalScanning = true
+					return m, m.scanGlobalCachesCmd()
+				}
+			}
 		}
+
+	case globalScanResult:
+		m.globalCaches = msg.caches
+		m.globalScanning = false
+		return m, nil
+
+	case globalScanProgressMsg:
+		m.globalProcessed = msg.CachesProcessed
+		m.globalTotal = msg.TotalCaches
+		m.globalCurrentCache = msg.CurrentCache
+		m.globalTotalSize = msg.TotalSize
+		return m, waitForProgress(msg.ch)
 
 	case []engine.Project:
 		m.projects = msg
@@ -1005,9 +1131,227 @@ func (m UIModel) View() string {
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
 		}
 
-		return mainView
+		// ===== TAB BAR =====
+		tabNames := []string{"1: Projects", "2: Global", "3: History"}
+		var tabParts []string
+		for i, name := range tabNames {
+			if tabIndex(i) == m.activeTab {
+				tabParts = append(tabParts, lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("#7D56F4")).
+					Background(lipgloss.Color("#2D2D2D")).
+					Padding(0, 2).
+					Render("[ "+name+" ]"))
+			} else {
+				tabParts = append(tabParts, lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#626262")).
+					Padding(0, 2).
+					Render("  "+name+"  "))
+			}
+		}
+		tabBar := strings.Join(tabParts, "") + "\n\n"
+
+		switch m.activeTab {
+		case tabProjects:
+			return tabBar + mainView
+
+		case tabGlobal:
+			var globalView strings.Builder
+			globalView.WriteString(lipgloss.NewStyle().Bold(true).Render("🌍 GLOBAL CACHES") + "\n\n")
+
+			// Caution banner
+			cautionStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FF5C5C")).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#FF5C5C")).
+				Padding(0, 2).
+				Width(70)
+			globalView.WriteString(cautionStyle.Render(
+				"⚠️  CAUTION: Global caches are shared system resources. Deleting them affects ALL projects.") + "\n\n")
+
+			if m.globalScanning {
+				// Show scanning progress
+				progress := 0.0
+				if m.globalTotal > 0 {
+					progress = float64(m.globalProcessed) / float64(m.globalTotal)
+				}
+				width := 40
+				filled := int(progress * float64(width))
+				if filled > width {
+					filled = width
+				}
+				bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
+				coloredBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(bar)
+
+				globalView.WriteString(fmt.Sprintf(
+					"  %s  Scanning global caches...\n\n"+
+						"  %s [%d/%d]\n\n"+
+						"  Current: %s\n"+
+						"  Total Found: %s\n",
+					m.spinner.View(),
+					coloredBar,
+					m.globalProcessed,
+					m.globalTotal,
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(m.globalCurrentCache),
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(m.globalTotalSize)),
+				))
+			} else if len(m.globalCaches) == 0 {
+				globalView.WriteString("  No global caches detected. Your system is clean! 🎉\n")
+			} else {
+				// Find max size for sparklines
+				var maxGlobalSize int64
+				var totalGlobalSize int64
+				for _, c := range m.globalCaches {
+					if c.Size > maxGlobalSize {
+						maxGlobalSize = c.Size
+					}
+					totalGlobalSize += c.Size
+				}
+
+				globalView.WriteString(fmt.Sprintf("  Found %d caches | Total: %s\n\n",
+					len(m.globalCaches),
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(totalGlobalSize))))
+
+				for i, cache := range m.globalCaches {
+					cursor := "  "
+					if m.globalCursor == i {
+						cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render("> ")
+					}
+
+					checked := " "
+					if _, ok := m.globalSelected[i]; ok {
+						checked = "x"
+					}
+
+					// Sparkline
+					sparkWidth := 8
+					var sparkFilled int
+					if maxGlobalSize > 0 {
+						sparkFilled = int(float64(cache.Size) / float64(maxGlobalSize) * float64(sparkWidth))
+					}
+					if sparkFilled < 1 && cache.Size > 0 {
+						sparkFilled = 1
+					}
+					sparkBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(strings.Repeat("█", sparkFilled)) + strings.Repeat("░", sparkWidth-sparkFilled)
+
+					name := fmt.Sprintf("%-14s", cache.Name)
+					sizeStr := fmt.Sprintf("%8s", formatBytes(cache.Size))
+
+					line := fmt.Sprintf("%s[%s] %s %s %s  %s", cursor, checked, cache.Icon, name, sparkBar, sizeStr)
+
+					if _, ok := m.globalSelected[i]; ok {
+						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(line) + "\n")
+					} else if m.globalCursor == i {
+						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(line) + "\n")
+					} else {
+						globalView.WriteString(line + "\n")
+					}
+
+					// Show description and CLI equivalent for selected item
+					if m.globalCursor == i {
+						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(
+							fmt.Sprintf("     %s\n     Equivalent: %s", cache.Description, cache.CleanCommand)) + "\n")
+					}
+				}
+			}
+
+			globalView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   enter: clean selected   •   1/2/3: switch tab   •   q: quit\n"))
+
+			globalContent := lipgloss.NewStyle().Padding(1, 2).Render(globalView.String())
+			return tabBar + globalContent
+
+		case tabHistory:
+			var histView strings.Builder
+			histView.WriteString(lipgloss.NewStyle().Bold(true).Render("📜 SCAN HISTORY") + "\n\n")
+
+			history := engine.LoadHistory()
+			if len(history.Entries) == 0 {
+				histView.WriteString("  No scan history yet. Run your first sweep!\n")
+			} else {
+				// Header
+				headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
+				histView.WriteString(headerStyle.Render(fmt.Sprintf("  %-20s  %-30s  %8s  %10s  %10s", "Date", "Path", "Projects", "Debris", "Freed")) + "\n")
+				histView.WriteString("  " + strings.Repeat("─", 85) + "\n")
+
+				// Show entries in reverse order (newest first)
+				for i := len(history.Entries) - 1; i >= 0; i-- {
+					entry := history.Entries[i]
+					dateStr := entry.Timestamp.Format("2006-01-02 15:04")
+					pathStr := entry.ScanPath
+					if len(pathStr) > 28 {
+						pathStr = "..." + pathStr[len(pathStr)-25:]
+					}
+
+					freedStr := ""
+					if entry.FreedSpace > 0 {
+						freedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(formatBytes(entry.FreedSpace))
+					} else {
+						freedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("—")
+					}
+
+					debrisStr := ""
+					if entry.TotalSize > 0 {
+						debrisStr = formatBytes(entry.TotalSize)
+					} else {
+						debrisStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("—")
+					}
+
+					histView.WriteString(fmt.Sprintf("  %-20s  %-30s  %8d  %10s  %10s\n",
+						dateStr, pathStr, entry.ProjectCount, debrisStr, freedStr))
+				}
+			}
+
+			histView.WriteString(helpStyle.Render("\n 1/2/3: switch tab   •   q: quit\n"))
+
+			histContent := lipgloss.NewStyle().Padding(1, 2).Render(histView.String())
+			return tabBar + histContent
+		}
+
+		return tabBar + mainView
 
 	case stateConfirmNuke:
+		if m.activeTab == tabGlobal {
+			// Global cache clean confirmation
+			var cacheNames []string
+			var totalCleanSize int64
+			for idx := range m.globalSelected {
+				if idx < len(m.globalCaches) {
+					cacheNames = append(cacheNames, m.globalCaches[idx].Name)
+					totalCleanSize += m.globalCaches[idx].Size
+				}
+			}
+
+			var cmdList string
+			for idx := range m.globalSelected {
+				if idx < len(m.globalCaches) {
+					cmdList += fmt.Sprintf("  • %s (%s)\n    → %s\n", m.globalCaches[idx].Name, formatBytes(m.globalCaches[idx].Size), m.globalCaches[idx].CleanCommand)
+				}
+			}
+
+			confirmBox := lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(lipgloss.Color("#E5C07B")).
+				Padding(1, 3).
+				Width(60).
+				Render(fmt.Sprintf(
+					"%s\n\n"+
+						"  You are about to clean %d global cache(s):\n\n%s\n"+
+						"  Total: %s\n\n"+
+						"  ⚠️  This affects ALL projects using these caches.\n"+
+						"  Caches will regenerate on next install/build.\n\n"+
+						"  %s",
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render("⚠️  CONFIRM GLOBAL CLEAN"),
+					len(m.globalSelected),
+					cmdList,
+					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render(formatBytes(totalCleanSize)),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("Press y to confirm, n to cancel"),
+				))
+
+			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, confirmBox)
+		}
+
+		// Project nuke confirmation (existing)
 		var nukeSize int64
 		var nukeCount int
 		for _, proj := range m.projects {
