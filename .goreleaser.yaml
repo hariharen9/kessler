@@ -49,8 +49,8 @@ changelog:
 nfpms:
   - id: deb
     package_name: kessler
-    vendor: hariharen
-    homepage: https://github.com/hariharen/kessler
+    vendor: hariharen9
+    homepage: https://github.com/hariharen9/kessler
     maintainer: hariharen
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
     license: MIT
@@ -62,11 +62,11 @@ nfpms:
 brews:
   - name: kessler
     repository:
-      owner: hariharen
+      owner: hariharen9
       name: homebrew-tap
       token: "{{ .Env.GITHUB_TOKEN }}"
     directory: Formula
-    homepage: https://github.com/hariharen/kessler
+    homepage: https://github.com/hariharen9/kessler
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
     license: MIT
     install: |
@@ -78,16 +78,16 @@ brews:
 scoops:
   - name: kessler
     repository:
-      owner: hariharen
+      owner: hariharen9
       name: scoop-bucket
       token: "{{ .Env.GITHUB_TOKEN }}"
-    homepage: https://github.com/hariharen/kessler
+    homepage: https://github.com/hariharen9/kessler
     description: "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches"
     license: MIT
 
 release:
   github:
-    owner: hariharen
+    owner: hariharen9
     name: kessler
   name_template: "v{{.Version}}"
   draft: false
