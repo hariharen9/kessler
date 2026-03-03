@@ -47,6 +47,7 @@ type UIModel struct {
 	scanPath           string
 	sortMode           SortMode
 	includeDeep        bool
+	showIgnored        bool
 	permanent          bool
 	width              int
 	height             int
@@ -78,6 +79,7 @@ var (
 	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).MarginTop(1)
 	deepStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Bold(true) // Red color for danger mode
 	safeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))            // Green for safe mode
+	ignoredStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Bold(true) // Yellow for ignored
 
 	paneStyle     = lipgloss.NewStyle().Padding(1, 2)
 	statsBoxStyle = lipgloss.NewStyle().
@@ -148,6 +150,9 @@ func (m *UIModel) startCleaning() tea.Cmd {
 		if _, ok := m.selected[proj.Path]; ok {
 			for _, artifact := range proj.Artifacts {
 				if !m.includeDeep && artifact.Tier == engine.TierDeep {
+					continue
+				}
+				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
 					continue
 				}
 				m.cleaningQueue = append(m.cleaningQueue, artifact)
@@ -251,8 +256,11 @@ func (m UIModel) getFilteredProjects() []engine.Project {
 	for _, p := range m.projects {
 		var activeSize int64
 		for _, a := range p.Artifacts {
+			if a.Tier == engine.TierIgnored && !m.showIgnored {
+				continue
+			}
 			// Only sum the sizes of artifacts that match the current Tier mode
-			if m.includeDeep || a.Tier == engine.TierSafe {
+			if m.includeDeep || a.Tier == engine.TierSafe || (a.Tier == engine.TierIgnored && m.showIgnored) {
 				activeSize += a.Size
 			}
 		}
@@ -357,6 +365,11 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateResults {
 				m.includeDeep = !m.includeDeep
 				m.cursor = 0 // Reset cursor as list changes
+			}
+		case "i": // Toggle Ignored files
+			if m.state == stateResults {
+				m.showIgnored = !m.showIgnored
+				m.cursor = 0
 			}
 		case " ": // Toggle selection
 			if m.state == stateResults {
@@ -508,6 +521,9 @@ func (m UIModel) View() string {
 		if m.includeDeep {
 			tierText = deepStyle.Render("DEEP CLEAN MODE (Includes Binaries & Builds)")
 		}
+		if m.showIgnored {
+			tierText += " " + ignoredStyle.Render("[+Ignored]")
+		}
 
 		// Build Left Pane
 		var leftContent strings.Builder
@@ -570,7 +586,7 @@ func (m UIModel) View() string {
 				}
 			}
 		}
-		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   s: sort   •   /: search   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
+		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   i: ignored   •   s: sort   •   /: search   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
 
 		// Build Right Pane (Stats)
 		var rightContent strings.Builder
@@ -612,6 +628,9 @@ func (m UIModel) View() string {
 			if _, ok := m.selected[proj.Path]; ok {
 				for _, artifact := range proj.Artifacts {
 					if !m.includeDeep && artifact.Tier == engine.TierDeep {
+						continue
+					}
+					if !m.showIgnored && artifact.Tier == engine.TierIgnored {
 						continue
 					}
 					selectedSize += artifact.Size
@@ -663,16 +682,23 @@ func (m UIModel) View() string {
 				if !m.includeDeep && artifact.Tier == engine.TierDeep {
 					continue
 				}
+				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
+					continue
+				}
 
 				tierColor := lipgloss.Color("#04B575") // Safe Green
+				tierLabel := ""
 				if artifact.Tier == engine.TierDeep {
 					tierColor = lipgloss.Color("#E5C07B") // Deep Yellow
 				} else if artifact.Tier == engine.TierDanger {
 					tierColor = lipgloss.Color("#FF5C5C") // Danger Red
+				} else if artifact.Tier == engine.TierIgnored {
+					tierColor = lipgloss.Color("#E5C07B") // Ignored Yellow
+					tierLabel = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Render("[user ignored]")
 				}
 
 				coloredPath := lipgloss.NewStyle().Foreground(tierColor).Render(filepath.Base(artifact.Path))
-				rightContent.WriteString(fmt.Sprintf(" ├─ %-15s : %s\n", coloredPath, formatBytes(artifact.Size)))
+				rightContent.WriteString(fmt.Sprintf(" ├─ %-15s : %s%s\n", coloredPath, formatBytes(artifact.Size), tierLabel))
 			}
 		}
 

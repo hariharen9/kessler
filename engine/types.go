@@ -5,9 +5,10 @@ import "time"
 type Tier string
 
 const (
-	TierSafe   Tier = "safe"
-	TierDeep   Tier = "deep"
-	TierDanger Tier = "danger"
+	TierSafe    Tier = "safe"
+	TierDeep    Tier = "deep"
+	TierDanger  Tier = "danger"
+	TierIgnored Tier = "ignored"
 )
 
 type RuleTarget struct {

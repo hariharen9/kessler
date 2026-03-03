@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	scanJSON      bool
-	scanSort      string
-	scanMinSize   string
-	scanOlderThan string
+	scanJSON           bool
+	scanSort           string
+	scanMinSize        string
+	scanOlderThan      string
+	scanIncludeIgnored bool
 )
 
 var scanCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func init() {
 	scanCmd.Flags().StringVarP(&scanSort, "sort", "s", "size", "Sort by: size, name")
 	scanCmd.Flags().StringVarP(&scanMinSize, "min-size", "m", "", "Only show projects above this size (e.g. 100MB, 1GB)")
 	scanCmd.Flags().StringVarP(&scanOlderThan, "older-than", "o", "", "Only show projects not touched in N days (e.g. 30d, 7d)")
+	scanCmd.Flags().BoolVar(&scanIncludeIgnored, "include-ignored", false, "Include gitignored artifacts in results")
 
 	rootCmd.AddCommand(scanCmd)
 }
@@ -60,7 +62,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build filter options
-	opts := engine.FilterOptions{IncludeDeep: deep}
+	opts := engine.FilterOptions{IncludeDeep: deep, ShowIgnored: scanIncludeIgnored}
 
 	if scanMinSize != "" {
 		size, err := parseSize(scanMinSize)

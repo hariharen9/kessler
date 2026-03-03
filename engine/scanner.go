@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"strings"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,6 +113,17 @@ func (s *Scanner) Scan(root string) ([]Project, error) {
 				}
 			}
 
+			// --- GITIGNORE SCANNING ---
+			// Find ignored items not already captured by rules
+			ignoredArtifacts := s.scanGitIgnored(path, project.Artifacts)
+			project.Artifacts = append(project.Artifacts, ignoredArtifacts...)
+			for _, a := range ignoredArtifacts {
+				project.TotalSize += a.Size
+				if project.LastModTime.IsZero() || a.ModTime.After(project.LastModTime) {
+					project.LastModTime = a.ModTime
+				}
+			}
+
 			if len(project.Artifacts) > 0 {
 				projects = append(projects, project)
 			}
@@ -192,9 +205,105 @@ func (s *Scanner) isTrackedByGit(projectRoot, artifactPath string) bool {
 	return len(bytes.TrimSpace(out)) > 0
 }
 
+// scanGitIgnored finds gitignored directories not already covered by rule-based artifacts.
+// SAFETY: Only considers ignored DIRECTORIES, not individual files.
+// Individual ignored files (like .env, lockfiles) are never surfaced.
+func (s *Scanner) scanGitIgnored(projectRoot string, existingArtifacts []Artifact) []Artifact {
+	// Get list of ignored directories
+	cmd := exec.Command("git", "ls-files", "--others", "--ignored", "--exclude-standard", "--directory")
+	cmd.Dir = projectRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil // Not a git repo or git error
+	}
+
+	output := strings.TrimSpace(string(out))
+	if output == "" {
+		return nil
+	}
+
+	// Build set of existing artifact base names for fast lookup
+	existingSet := make(map[string]bool)
+	for _, a := range existingArtifacts {
+		existingSet[filepath.Base(a.Path)] = true
+	}
+
+	// Build set of all known rule target paths to filter out
+	ruleTargetSet := make(map[string]bool)
+	for _, rule := range s.Config.Rules {
+		for _, target := range rule.Targets {
+			ruleTargetSet[target.Path] = true
+		}
+		// Also exclude trigger files (package.json, Cargo.toml, etc.)
+		for _, trigger := range rule.Triggers {
+			ruleTargetSet[trigger] = true
+		}
+	}
+
+	// Also add danger zone items
+	for _, d := range s.Config.DangerZone {
+		ruleTargetSet[d] = true
+	}
+
+	var artifacts []Artifact
+	lines := strings.Split(output, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// SAFETY: Only consider directory entries (they have a trailing slash).
+		// Individual files like .env, lockfiles, configs must NEVER be surfaced.
+		if !strings.HasSuffix(line, "/") {
+			continue
+		}
+
+		// Remove trailing slash from directory entries
+		cleanName := strings.TrimSuffix(line, "/")
+
+		// Skip if already covered by rules or existing artifacts
+		if existingSet[cleanName] || ruleTargetSet[cleanName] {
+			continue
+		}
+
+		// Skip danger zone items
+		isDangerous := false
+		for _, d := range s.Config.DangerZone {
+			if cleanName == d {
+				isDangerous = true
+				break
+			}
+		}
+		if isDangerous {
+			continue
+		}
+
+		targetPath := filepath.Join(projectRoot, cleanName)
+		info, err := os.Stat(targetPath)
+		if err != nil {
+			continue
+		}
+
+		size, modTime := s.calculateSizeAndModTime(targetPath, info)
+		if size > 0 {
+			artifacts = append(artifacts, Artifact{
+				Path:    targetPath,
+				Size:    size,
+				Tier:    TierIgnored,
+				ModTime: modTime,
+			})
+		}
+	}
+
+	return artifacts
+}
+
 // FilterOptions controls post-scan filtering for non-interactive mode.
 type FilterOptions struct {
 	IncludeDeep bool
+	ShowIgnored bool
 	MinSize     int64         // bytes, 0 = no filter
 	OlderThan   time.Duration // 0 = no filter
 }
@@ -209,7 +318,10 @@ func FilterProjects(projects []Project, opts FilterOptions) []Project {
 		var activeArtifacts []Artifact
 
 		for _, a := range p.Artifacts {
-			if !opts.IncludeDeep && a.Tier == TierDeep {
+			if a.Tier == TierIgnored && !opts.ShowIgnored {
+				continue
+			}
+			if a.Tier == TierDeep && !opts.IncludeDeep {
 				continue
 			}
 			activeSize += a.Size

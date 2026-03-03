@@ -14,11 +14,12 @@ import (
 )
 
 var (
-	cleanForce     bool
-	cleanPermanent bool
-	cleanDryRun    bool
-	cleanMinSize   string
-	cleanOlderThan string
+	cleanForce          bool
+	cleanPermanent      bool
+	cleanDryRun         bool
+	cleanMinSize        string
+	cleanOlderThan      string
+	cleanIncludeIgnored bool
 )
 
 var cleanCmd = &cobra.Command{
@@ -44,6 +45,7 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without deleting")
 	cleanCmd.Flags().StringVarP(&cleanMinSize, "min-size", "m", "", "Only clean projects above this size (e.g. 100MB, 1GB)")
 	cleanCmd.Flags().StringVarP(&cleanOlderThan, "older-than", "o", "", "Only clean projects not touched in N days (e.g. 30d)")
+	cleanCmd.Flags().BoolVar(&cleanIncludeIgnored, "include-ignored", false, "Include gitignored artifacts in cleaning")
 
 	rootCmd.AddCommand(cleanCmd)
 }
@@ -66,7 +68,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build filter options
-	opts := engine.FilterOptions{IncludeDeep: deep}
+	opts := engine.FilterOptions{IncludeDeep: deep, ShowIgnored: cleanIncludeIgnored}
 
 	if cleanMinSize != "" {
 		size, err := parseSize(cleanMinSize)
@@ -133,6 +135,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 		label := "Proceed?"
 		if deep {
 			label = "⚠️  Deep clean includes builds & binaries. Proceed?"
+		}
+		if cleanIncludeIgnored {
+			label = "⚠️  Includes gitignored files. Proceed?"
+			if deep {
+				label = "⚠️  Deep clean + gitignored files. Proceed?"
+			}
 		}
 		fmt.Printf("\n  %s [y/N] ", label)
 		reader := bufio.NewReader(os.Stdin)

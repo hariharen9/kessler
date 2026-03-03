@@ -14,6 +14,7 @@ Over time, it gets clogged with `node_modules`, stray `build/` folders, forgotte
 
 - 🏎️ **Blazingly Fast:** Written in Go, it scans massive directory trees concurrently in milliseconds.
 - 🧠 **Context-Aware Engine:** Doesn't just blindly delete folders. It looks for triggers (e.g., `package.json`, `Cargo.toml`) to identify project types and *only* targets known safe artifacts for that specific ecosystem.
+- 🔍 **`.gitignore` Intelligence:** Kessler goes beyond static rules — it dynamically queries Git to discover ignored directories unique to *your* project. Custom data folders, generated output, experiment logs — if Git ignores it and Kessler's rules don't already cover it, it surfaces as a "User Ignored" artifact you can optionally clean. Individual files like `.env` and lockfiles are **never** touched.
 - 🛡️ **The Git Safety Net:** Before Kessler flags *any* folder as junk, it silently queries Git (`git ls-files`). If a folder contains files actively tracked by version control, Kessler immediately aborts and ignores it.
 - ♻️ **OS Trash Integration:** Mistakes happen. Instead of using a terrifying `rm -rf`, Kessler safely moves debris to your native OS Trash/Recycle Bin (supports macOS, Windows, and Linux), giving you an "Undo" button.
 - 🎨 **Beautiful TUI & Telemetry:** Powered by Charmbracelet's Bubble Tea. Features an interactive dashboard with live "Orbital Telemetry," ecosystem icons, root drive usage, and visual space tracking.
@@ -60,6 +61,7 @@ kessler . --deep        # Include build outputs (dist, build, bin)
 | `Space` | Toggle selection |
 | `a` | Select / deselect all |
 | `t` | Toggle Safe ↔ Deep mode |
+| `i` | Toggle gitignored artifacts |
 | `s` | Sort by Size ↔ Name |
 | `/` | Search projects |
 | `Enter` | Move selected to Trash |
@@ -113,6 +115,18 @@ Current out-of-the-box support includes:
 - **Elixir:** `deps`, `_build`
 - **Terraform / IaC:** `.terraform`, `cdk.out`, `.serverless`
 - **OS & Editor:** `.DS_Store`, `Thumbs.db`, `.idea`, `.vscode`
+
+### `.gitignore` Intelligence
+
+Kessler doesn't stop at static rules. For every detected project, it runs `git ls-files --ignored --directory` to discover **directories your `.gitignore` is hiding** that aren't already covered by Kessler's rules. These appear as `[user ignored]` artifacts.
+
+This means Kessler automatically adapts to your project's unique structure — custom `data/` folders, ML experiment outputs, generated assets, temp directories — without you needing to write any rules.
+
+**Safety guarantees:**
+- ✅ Only ignored **directories** are surfaced — individual files (`.env`, lockfiles, configs) are never shown
+- ✅ Trigger files (`package.json`, `Cargo.toml`, etc.) are always excluded
+- ✅ Danger zone items can never appear, even if gitignored
+- ✅ Hidden by default — press `i` in the TUI or use `--include-ignored` in CLI to opt in
 
 ### Custom User Rules
 
