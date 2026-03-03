@@ -26,6 +26,52 @@ type Config struct {
 	DangerZone []string `yaml:"danger_zone"`
 }
 
+// MergeConfigs merges a user config into a base config.
+// - Rules with the same Name are merged (user targets are appended).
+// - Rules with new Names are appended.
+// - DangerZone entries are unioned.
+func MergeConfigs(base, user Config) Config {
+	merged := base
+
+	for _, userRule := range user.Rules {
+		found := false
+		for i, baseRule := range merged.Rules {
+			if baseRule.Name == userRule.Name {
+				// Merge triggers (union)
+				triggerSet := make(map[string]bool)
+				for _, t := range baseRule.Triggers {
+					triggerSet[t] = true
+				}
+				for _, t := range userRule.Triggers {
+					if !triggerSet[t] {
+						merged.Rules[i].Triggers = append(merged.Rules[i].Triggers, t)
+					}
+				}
+				// Append new targets
+				merged.Rules[i].Targets = append(merged.Rules[i].Targets, userRule.Targets...)
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged.Rules = append(merged.Rules, userRule)
+		}
+	}
+
+	// Union danger zone
+	dangerSet := make(map[string]bool)
+	for _, d := range merged.DangerZone {
+		dangerSet[d] = true
+	}
+	for _, d := range user.DangerZone {
+		if !dangerSet[d] {
+			merged.DangerZone = append(merged.DangerZone, d)
+		}
+	}
+
+	return merged
+}
+
 type Artifact struct {
 	Path    string
 	Size    int64

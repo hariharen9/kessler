@@ -54,7 +54,8 @@ type UIModel struct {
 	failedTrashTargets []string
 
 	// Configuration
-	rulesData []byte
+	rulesData     []byte
+	userRulesData []byte
 
 	// Progress tracking for animated cleaning
 	totalToClean    int
@@ -99,7 +100,7 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func InitialModel(scanPath string, includeDeep bool, rulesData []byte) UIModel {
+func InitialModel(scanPath string, includeDeep bool, rulesData []byte, userRulesData []byte) UIModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -110,14 +111,15 @@ func InitialModel(scanPath string, includeDeep bool, rulesData []byte) UIModel {
 	ti.Width = 40
 
 	return UIModel{
-		spinner:     s,
-		textInput:   ti,
-		state:       stateScanning,
-		selected:    make(map[string]struct{}),
-		scanPath:    scanPath,
-		sortMode:    SortSize,
-		includeDeep: includeDeep,
-		rulesData:   rulesData,
+		spinner:       s,
+		textInput:     ti,
+		state:         stateScanning,
+		selected:      make(map[string]struct{}),
+		scanPath:      scanPath,
+		sortMode:      SortSize,
+		includeDeep:   includeDeep,
+		rulesData:     rulesData,
+		userRulesData: userRulesData,
 	}
 }
 
@@ -127,7 +129,7 @@ func (m UIModel) Init() tea.Cmd {
 
 func (m UIModel) startScan() tea.Cmd {
 	return func() tea.Msg {
-		scanner, err := engine.NewScanner(m.rulesData)
+		scanner, err := engine.NewScannerMerged(m.rulesData, m.userRulesData)
 		if err != nil {
 			return err
 		}

@@ -1,9 +1,9 @@
 package cmd
 
 import (
-	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/hariharen/kessler/internal/tui"
@@ -12,6 +12,9 @@ import (
 
 // RulesData is set by main.go from the embedded rules.yaml.
 var RulesData []byte
+
+// UserRulesData is loaded from ~/.config/kessler/rules.yaml if it exists.
+var UserRulesData []byte
 
 var deep bool
 
@@ -22,15 +25,23 @@ var rootCmd = &cobra.Command{
 sweeps away runtime artifacts and build caches (node_modules, __pycache__,
 target/, etc.) without ever touching your source code.
 
-Run without a subcommand to launch the interactive TUI dashboard.`,
+Run without a subcommand to launch the interactive TUI dashboard.
+Custom rules can be added at ~/.config/kessler/rules.yaml`,
 	Args: cobra.MaximumNArgs(1),
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		loadUserRules()
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scanPath := "."
 		if len(args) > 0 {
 			scanPath = args[0]
 		}
 
-		p := tea.NewProgram(tui.InitialModel(scanPath, deep, RulesData), tea.WithAltScreen())
+		// For the TUI, we pass both base and user rules.
+		// The TUI's scanner will need to use NewScannerMerged.
+		// For now, we pre-merge and pass the base rules (TUI uses NewScanner internally).
+		// We update the TUI to accept user rules separately.
+		p := tea.NewProgram(tui.InitialModel(scanPath, deep, RulesData, UserRulesData), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
 		}
@@ -40,6 +51,21 @@ Run without a subcommand to launch the interactive TUI dashboard.`,
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&deep, "deep", "d", false, "Include deep-tier artifacts (builds, binaries)")
+}
+
+func loadUserRules() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	configPath := filepath.Join(home, ".config", "kessler", "rules.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return // File doesn't exist or unreadable — that's fine
+	}
+
+	UserRulesData = data
 }
 
 func Execute() {

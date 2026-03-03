@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -22,6 +23,25 @@ func NewScanner(rulesData []byte) (*Scanner, error) {
 	}
 
 	return &Scanner{Config: config}, nil
+}
+
+// NewScannerMerged creates a Scanner from base rules, optionally merging user rules on top.
+// If userRulesData is nil or empty, it behaves identically to NewScanner.
+func NewScannerMerged(baseData []byte, userRulesData []byte) (*Scanner, error) {
+	var baseConfig Config
+	if err := yaml.Unmarshal(baseData, &baseConfig); err != nil {
+		return nil, err
+	}
+
+	if len(userRulesData) > 0 {
+		var userConfig Config
+		if err := yaml.Unmarshal(userRulesData, &userConfig); err != nil {
+			return nil, fmt.Errorf("user rules: %w", err)
+		}
+		baseConfig = MergeConfigs(baseConfig, userConfig)
+	}
+
+	return &Scanner{Config: baseConfig}, nil
 }
 
 func (s *Scanner) Scan(root string) ([]Project, error) {

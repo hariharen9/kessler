@@ -49,7 +49,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		scanPath = args[0]
 	}
 
-	scanner, err := engine.NewScanner(RulesData)
+	scanner, err := engine.NewScannerMerged(RulesData, UserRulesData)
 	if err != nil {
 		return fmt.Errorf("failed to load rules: %w", err)
 	}
