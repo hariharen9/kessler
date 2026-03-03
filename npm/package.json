@@ -1,6 +1,6 @@
 {
-    "name": "kessler",
-    "version": "0.1.0",
+    "name": "kessler-cli",
+    "version": "0.1.1",
     "description": "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches",
     "keywords": [
         "cleanup",

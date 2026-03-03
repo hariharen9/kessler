@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 
 const { execFileSync } = require("child_process");
-const { createWriteStream, mkdirSync, chmodSync, existsSync, unlinkSync } = require("fs");
+const { createWriteStream, mkdirSync, existsSync, unlinkSync } = require("fs");
 const { get } = require("https");
 const { join } = require("path");
-const { createGunzip } = require("zlib");
-const { Extract } = require("tar") || {};
 
 const pkg = require("./package.json");
 const VERSION = pkg.version;
@@ -39,16 +37,22 @@ function getDownloadUrl() {
     return `https://github.com/${REPO}/releases/download/v${VERSION}/kessler_${VERSION}_${platform}_${arch}.${ext}`;
 }
 
-function download(url) {
+function download(url, dest) {
     return new Promise((resolve, reject) => {
         get(url, (res) => {
             if (res.statusCode === 302 || res.statusCode === 301) {
-                return download(res.headers.location).then(resolve).catch(reject);
+                return download(res.headers.location, dest).then(resolve).catch(reject);
             }
             if (res.statusCode !== 200) {
                 return reject(new Error(`Download failed: HTTP ${res.statusCode}`));
             }
-            resolve(res);
+            const file = createWriteStream(dest);
+            res.pipe(file);
+            file.on("finish", () => {
+                file.close();
+                resolve();
+            });
+            file.on("error", reject);
         }).on("error", reject);
     });
 }
@@ -64,46 +68,36 @@ async function install() {
     mkdirSync(binDir, { recursive: true });
 
     const url = getDownloadUrl();
+    const isWindows = process.platform === "win32";
+    const archiveExt = isWindows ? "zip" : "tar.gz";
+    const tmpFile = join(binDir, `kessler.${archiveExt}`);
+
     console.log(`Downloading kessler v${VERSION}...`);
 
     try {
-        const res = await download(url);
+        await download(url, tmpFile);
 
-        if (process.platform === "win32") {
-            // For Windows zip, download to temp and extract
-            const tmpPath = join(binDir, "kessler.zip");
-            const file = createWriteStream(tmpPath);
-            await new Promise((resolve, reject) => {
-                res.pipe(file);
-                file.on("finish", resolve);
-                file.on("error", reject);
-            });
-            // Use tar to extract zip (available on modern Windows)
-            execFileSync("tar", ["-xf", tmpPath, "-C", binDir, getBinaryName()]);
-            unlinkSync(tmpPath);
+        // Extract using system tar (available on macOS, Linux, and modern Windows)
+        if (isWindows) {
+            execFileSync("tar", ["-xf", tmpFile, "-C", binDir, getBinaryName()]);
         } else {
-            // For Unix tar.gz, pipe through gunzip and tar
-            await new Promise((resolve, reject) => {
-                const gunzip = createGunzip();
-                const extractor = require("tar").extract({ cwd: binDir, strip: 0 });
-
-                // Only extract the binary
-                extractor.on("entry", (entry) => {
-                    if (entry.path !== "kessler") {
-                        entry.resume();
-                    }
-                });
-
-                res.pipe(gunzip).pipe(extractor);
-                extractor.on("finish", resolve);
-                extractor.on("error", reject);
-                gunzip.on("error", reject);
-            });
+            execFileSync("tar", ["-xzf", tmpFile, "-C", binDir, getBinaryName()]);
         }
 
-        chmodSync(binaryPath, 0o755);
+        unlinkSync(tmpFile);
+
+        // Make binary executable on Unix
+        if (!isWindows) {
+            const { chmodSync } = require("fs");
+            chmodSync(binaryPath, 0o755);
+        }
+
         console.log(`kessler v${VERSION} installed successfully!`);
     } catch (err) {
+        // Clean up temp file on failure
+        if (existsSync(tmpFile)) {
+            try { unlinkSync(tmpFile); } catch (_) { }
+        }
         console.error(`Failed to install kessler: ${err.message}`);
         console.error(`You can manually download from: https://github.com/${REPO}/releases`);
         process.exit(1);
