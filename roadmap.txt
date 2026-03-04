@@ -1,0 +1,87 @@
+Enhancements in pipeline: 
+
+
+  1. 🛡️ Safety & Intelligence (High Priority)
+   * ✅ [DONE] Dry-Run by Default in CLI: Kessler now defaults to a dry-run preview. Requires --confirm or --force to execute in scripts, or y/n in interactive mode.
+   * ⏳ "Stale" Logic (Time-Based Intelligence): Instead of just finding all node_modules, Kessler could prioritize those that haven't been touched in >30 days. We can use atime (access time) or the latest mtime in
+     the folder to identify "zombie" projects that are safe to reap.
+   * ⏳ Protection for "Active" Projects: Check if a project has a running process (e.g., a node process with a CWD in that directory) before suggesting a clean. You don't want to delete node_modules while a dev
+     server is running!
+
+  2. 🌍 Ecosystem Expansion (Medium Priority)
+   * ⏳ Container Image Scanning: Integrate with docker images to find large, unused, or dangling images that aren't necessarily "global caches" but are definitely "orbital debris."
+   * ⏳ Dependency Deduplication (The "pnpm" analyzer): If a user has 50 projects all using the same version of react, Kessler could suggest moving to a disk-efficient package manager like pnpm or bun to save space
+     without deleting anything.
+   * ⏳ Cloud Artifacts: Add rules for .serverless, cdk.out, and .terraform providers. These can grow to gigabytes very quickly and are often forgotten.
+
+  3. 🎨 User Experience & TUI (Polishing)
+   * ⏳ Bulk Actions by Ecosystem: Add a key (e.g., E) to "Select all Node.js projects" or "Select all Rust projects."
+   * ✅ [DONE] Quick-Look / File Tree: Users can now press 'p' in the TUI to open a modal and "look inside" artifact folders using a dynamic, depth-limited file tree.
+   * ⏳ Customizable Color Themes: Allow users to define their own Lipgloss styles in the rules.yaml (e.g., theme: "nord" or theme: "dracula").
+
+  4. 📈 Telemetry & Reporting
+   * ⏳ Disk Recovery Over Time: Since we have a history, we could show a small ASCII line graph in the TUI showing "Space Saved over the last 30 days."
+   * ⏳ Exportable Reports: Add a kessler scan --report command that generates a beautiful HTML or Markdown report of your disk usage, which is great for "Spring Cleaning" blog posts or internal team audits.
+
+  5. 🛠️ Developer Workflow
+   * ⏳ Pre-Commit/Post-Merge Hooks: Provide a snippet for a Git hook that runs kessler scan if disk space is below a certain threshold.
+   * ⏳ "Deep" Scan for Large Files: Occasionally, debris isn't in a node_modules folder; it's a huge_final_video_v2_final.mp4 forgotten in a tmp/ folder. A "Large File Finder" mode would be a natural extension of
+     Kessler's "Clear the Orbit" philosophy.
+
+
+
+
+Future Roadmap:
+
+  1. 📦 "Cryosleep" — Stale Project Archival
+  Instead of just deleting or keeping a project, Kessler could offer to Archive it.
+   * The Problem: You have 50 projects you might need "one day," so you don't delete them, but they clog your disk and your search results.
+   * The Feature: A Kessler archive command that:
+       1. Cleans all artifacts (Node/Rust/etc).
+       2. Zips the remaining source code into a highly compressed .kessler.tar.gz.
+       3. Moves it to a dedicated ~/Kessler/Archives folder (or S3/Cloud).
+       4. Leaves a small .kessler-ghost metadata file in the original location so you can "wake it up" later with one command.
+
+
+  2. 🕵️ "Dark Matter" — Secret & Sensitive File Scanner
+  Since Kessler is already scanning every project directory, it is the perfect place to check for security debris.
+   * The Problem: Forgotten .env files, id_rsa backups, or secrets.json files that are not in .gitignore and could be accidentally committed.
+   * The Feature: A "Security Audit" mode that flags:
+       * Un-ignored environment files.
+       * Hardcoded AWS/Stripe keys.
+       * Local SQLite databases containing sensitive data.
+       * Utility: "Clean your orbit of security risks."
+
+
+  3. 🚦 "Launchpad" — The Unified Project Navigator
+  Turn Kessler into the way you start your day.
+   * The Problem: You have projects scattered across ~/work, ~/personal, and ~/experiments.
+   * The Feature: A TUI "Project Launcher" (Tab 4) that:
+       * Fuzzy searches all projects found during the scan.
+       * Shows "Last Used" time and "Disk Usage."
+       * Action: Press o to open in VS Code, i for IntelliJ, or t to jump to a terminal in that path.
+
+
+  4. 🔗 "Nebula" — The Shared Dependency Analyzer
+  Identify massive disk waste caused by dependency duplication.
+   * The Problem: You have 20 React projects, and each has its own 200MB copy of node_modules containing the exact same versions of the same libraries.
+   * The Feature: Kessler analyzes your package.json or Cargo.toml files across projects and reports:
+       * "You have 15 copies of React v18.2.0. Total waste: 1.2GB."
+       * Action: Suggest (or automate) converting those projects to use a global store via pnpm or bun.
+
+
+  5. 👻 "Ghost in the Machine" — Dangling Resources Finder
+  Expand beyond files to system resources.
+   * The Problem: You deleted a project folder, but its Docker volumes, database schemas (Postgres/Redis), or local tmux sessions are still running/occupying space.
+   * The Feature: Kessler links project paths to other tools:
+       * "This folder is gone, but a Docker Volume named 'my-project-db' still exists."
+       * "You have a Postgres database 'dev_db_1' that hasn't been connected to in 60 days."
+
+
+  6. 🧪 "Environmental Doctor" — Toolchain Auditor
+  Developers often have 5 versions of Node, 3 versions of Python, and 2 versions of Java installed.
+   * The Problem: Massive disk usage from unused toolchains (nvm, pyenv, rustup toolchains).
+   * The Feature:
+       * Scan for projects and see what versions they actually use (from .nvmrc, runtime.txt, etc.).
+       * Identify installed toolchain versions that are not required by any of your projects.
+       * "Kessler found Node v14 is installed but 0 projects use it. Save 500MB?"

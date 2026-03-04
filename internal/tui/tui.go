@@ -65,6 +65,7 @@ type UIModel struct {
 
 	// Preview modal
 	showPreviewModal bool
+	previewCursor    int
 
 	// Post-clean feedback
 	lastFreedSpace int64
@@ -480,12 +481,38 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateQuitting
 			return m, tea.Quit
 		case "up", "k":
+			if m.state == stateResults && m.showPreviewModal {
+				if m.previewCursor > 0 {
+					m.previewCursor--
+				}
+				return m, nil
+			}
 			if m.state == stateResults && m.activeTab == tabProjects && m.cursor > 0 {
 				m.cursor--
 			} else if m.state == stateResults && m.activeTab == tabGlobal && m.globalCursor > 0 {
 				m.globalCursor--
 			}
 		case "down", "j":
+			if m.state == stateResults && m.showPreviewModal {
+				filtered := m.getFilteredProjects()
+				if len(filtered) > 0 && m.cursor < len(filtered) {
+					activeProj := filtered[m.cursor]
+					var visibleArtifacts []engine.Artifact
+					for _, artifact := range activeProj.Artifacts {
+						if !m.includeDeep && artifact.Tier == engine.TierDeep {
+							continue
+						}
+						if !m.showIgnored && artifact.Tier == engine.TierIgnored {
+							continue
+						}
+						visibleArtifacts = append(visibleArtifacts, artifact)
+					}
+					if m.previewCursor < len(visibleArtifacts)-1 {
+						m.previewCursor++
+					}
+				}
+				return m, nil
+			}
 			if m.state == stateResults && m.activeTab == tabProjects {
 				filtered := m.getFilteredProjects()
 				if m.cursor < len(filtered)-1 {
@@ -523,6 +550,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "p": // Toggle preview modal
 			if m.state == stateResults {
 				m.showPreviewModal = !m.showPreviewModal
+				m.previewCursor = 0
 			}
 		case " ": // Toggle selection
 			if m.state == stateResults && m.activeTab == tabProjects {
@@ -1080,16 +1108,27 @@ func (m UIModel) View() string {
 		// Preview Modal Overlay
 		if m.showPreviewModal && len(filtered) > 0 && m.cursor < len(filtered) {
 			activeProj := filtered[m.cursor]
-			var modalContent strings.Builder
-			modalContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 FULL PREVIEW — "+filepath.Base(activeProj.Path)) + "\n")
-			modalContent.WriteString(fmt.Sprintf("%s %s  •  %s\n\n", getIcon(activeProj.Type), activeProj.Type, formatBytes(activeProj.TotalSize)))
 
+			// Collect visible artifacts for the active project
+			var visibleArtifacts []engine.Artifact
 			for _, artifact := range activeProj.Artifacts {
 				if !m.includeDeep && artifact.Tier == engine.TierDeep {
 					continue
 				}
 				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
 					continue
+				}
+				visibleArtifacts = append(visibleArtifacts, artifact)
+			}
+
+			// Left Pane: Artifact List
+			var listContent strings.Builder
+			listContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 ARTIFACTS — "+filepath.Base(activeProj.Path)) + "\n\n")
+
+			for i, artifact := range visibleArtifacts {
+				cursor := "  "
+				if m.previewCursor == i {
+					cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render("> ")
 				}
 
 				tierColor := lipgloss.Color("#04B575")
@@ -1102,31 +1141,76 @@ func (m UIModel) View() string {
 					tierLabel = " [danger]"
 				} else if artifact.Tier == engine.TierIgnored {
 					tierColor = lipgloss.Color("#E5C07B")
-					tierLabel = " [user ignored]"
+					tierLabel = " [ignored]"
 				}
 
-				coloredLabel := lipgloss.NewStyle().Foreground(tierColor).Render(tierLabel)
-				modalContent.WriteString(fmt.Sprintf("  ├─ %-40s  %8s%s\n", filepath.Base(artifact.Path), formatBytes(artifact.Size), coloredLabel))
+				name := filepath.Base(artifact.Path)
+				if len(name) > 30 {
+					name = name[:27] + "..."
+				}
+
+				coloredName := lipgloss.NewStyle().Foreground(tierColor).Render(name)
+				line := fmt.Sprintf("%s%-32s %8s%s", cursor, coloredName, formatBytes(artifact.Size), tierLabel)
+
+				if m.previewCursor == i {
+					listContent.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("#2D2D2D")).Render(line) + "\n")
+				} else {
+					listContent.WriteString(line + "\n")
+				}
 			}
 
-			modalContent.WriteString("\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render("  press p to close"))
-
-			modalWidth := m.width - 10
-			if modalWidth < 50 {
-				modalWidth = 50
+			// Better modal sizing
+			modalWidth := int(float64(m.width) * 0.9)
+			if modalWidth > 110 {
+				modalWidth = 110
 			}
-			modalHeight := m.height - 6
-			if modalHeight < 10 {
-				modalHeight = 10
+			if modalWidth < 80 {
+				modalWidth = 80
+			}
+			modalHeight := int(float64(m.height) * 0.8)
+			if modalHeight > 30 {
+				modalHeight = 30
+			}
+			if modalHeight < 15 {
+				modalHeight = 15
 			}
 
+			// Right Pane: File Tree
+			var treeContent strings.Builder
+			if m.previewCursor < len(visibleArtifacts) {
+				selectedArtifact := visibleArtifacts[m.previewCursor]
+				treeContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🌳 QUICK-LOOK: "+filepath.Base(selectedArtifact.Path)) + "\n\n")
+				
+				// Calculate max lines for tree based on modal height
+				maxTreeLines := modalHeight - 10
+				if maxTreeLines < 5 {
+					maxTreeLines = 5
+				}
+				treeContent.WriteString(renderFileTree(selectedArtifact.Path, maxTreeLines))
+			}
+
+			leftPane := lipgloss.NewStyle().
+				Width(modalWidth/2 - 3).
+				Padding(0, 1).
+				Render(listContent.String())
+
+			rightPane := lipgloss.NewStyle().
+				Width(modalWidth/2 - 3).
+				Padding(0, 1).
+				Border(lipgloss.NormalBorder(), false, false, false, true).
+				BorderForeground(lipgloss.Color("#444444")).
+				Render(treeContent.String())
+
+			modalContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+			
 			modalBox := lipgloss.NewStyle().
 				Border(lipgloss.DoubleBorder()).
 				BorderForeground(lipgloss.Color("#7D56F4")).
 				Padding(1, 2).
 				Width(modalWidth).
-				MaxHeight(modalHeight).
-				Render(modalContent.String())
+				Height(modalHeight).
+				Render(modalContent + "\n\n" +
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render("  ↑/↓: navigate   •   p: close preview"))
 
 			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
 		}
@@ -1450,4 +1534,75 @@ func (m UIModel) View() string {
 		return "\n 👋 Orbit clear. Catch you on the next sweep!\n\n"
 	}
 	return ""
+}
+
+func renderFileTree(root string, maxTotalLines int) string {
+	var sb strings.Builder
+	depthLimit := 3
+	maxItemsPerDir := 15
+	lineCount := 0
+
+	var walk func(path string, depth int, prefix string)
+	walk = func(path string, depth int, prefix string) {
+		if depth > depthLimit || lineCount >= maxTotalLines-1 {
+			return
+		}
+
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return
+		}
+
+		// Sort entries: directories first, then files
+		sort.Slice(entries, func(i, j int) bool {
+			if entries[i].IsDir() && !entries[j].IsDir() {
+				return true
+			}
+			if !entries[i].IsDir() && entries[j].IsDir() {
+				return false
+			}
+			return entries[i].Name() < entries[j].Name()
+		})
+
+		count := 0
+		for i, entry := range entries {
+			if lineCount >= maxTotalLines-1 {
+				if count < len(entries) {
+					sb.WriteString(prefix + "└── ... (more items)\n")
+					lineCount++
+				}
+				return
+			}
+
+			if count >= maxItemsPerDir {
+				sb.WriteString(prefix + "└── ... (" + fmt.Sprintf("%d", len(entries)-maxItemsPerDir) + " more items)\n")
+				lineCount++
+				break
+			}
+
+			isLast := i == len(entries)-1 || count == maxItemsPerDir-1
+			connector := "├── "
+			newPrefix := prefix + "│   "
+			if isLast {
+				connector = "└── "
+				newPrefix = prefix + "    "
+			}
+
+			name := entry.Name()
+			if entry.IsDir() {
+				name = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true).Render(name + "/")
+			}
+
+			sb.WriteString(prefix + connector + name + "\n")
+			lineCount++
+
+			if entry.IsDir() && depth < depthLimit {
+				walk(filepath.Join(path, entry.Name()), depth+1, newPrefix)
+			}
+			count++
+		}
+	}
+
+	walk(root, 1, "")
+	return sb.String()
 }

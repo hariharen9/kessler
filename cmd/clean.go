@@ -9,11 +9,13 @@ import (
 	"strings"
 
 	"github.com/hariharen9/kessler/engine"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
 var (
 	cleanForce          bool
+	cleanConfirm        bool
 	cleanPermanent      bool
 	cleanDryRun         bool
 	cleanMinSize        string
@@ -26,19 +28,21 @@ var cleanCmd = &cobra.Command{
 	Short: "Non-interactively clean project artifacts",
 	Long: `Scan and clean build artifacts without the TUI.
 
-In safe mode (default), cleaning proceeds without asking.
-In deep mode (--deep), a Y/n confirmation is shown unless --force is used.
+Kessler defaults to a dry-run preview. To execute the cleaning:
+- In an interactive terminal, it will ask for a [y/N] confirmation.
+- In scripts (non-interactive), you must use the --force or --confirm flag.
 
 Examples:
-  kessler clean ~/Projects
-  kessler clean ~/Projects ~/Work --deep --force
-  kessler clean ~/Projects --older-than 30d --dry-run
-  kessler clean ~/Projects --permanent`,
+  kessler clean ~/Projects                         # Shows preview + asks y/n
+  kessler clean ~/Projects --confirm                # Clean without asking (good for scripts)
+  kessler clean ~/Projects --deep --force           # Deep clean (builds/binaries) without asking
+  kessler clean ~/Projects --older-than 30d         # Shows preview only if not a terminal`,
 	RunE: runClean,
 }
 
 func init() {
-	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "Skip confirmation prompts")
+	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "Skip confirmation prompts (force execute)")
+	cleanCmd.Flags().BoolVarP(&cleanConfirm, "confirm", "c", false, "Confirm execution (bypass dry-run)")
 	cleanCmd.Flags().BoolVarP(&cleanPermanent, "permanent", "p", false, "Permanently delete instead of moving to trash")
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without deleting")
 	cleanCmd.Flags().StringVarP(&cleanMinSize, "min-size", "m", "", "Only clean projects above this size (e.g. 100MB, 1GB)")
@@ -123,16 +127,30 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\n  Total: %d artifacts, %s\n", len(artifacts), formatBytes(totalSize))
 
-	// Dry run: stop here
+	// If explicit dry-run, stop here
 	if cleanDryRun {
 		fmt.Println("\n  ── DRY RUN (no files were deleted) ──")
 		fmt.Println()
 		return nil
 	}
 
-	// Ask for confirmation unless --force
-	if !cleanForce {
-		label := "Proceed?"
+	// Logic for default dry-run vs execution
+	shouldExecute := cleanForce || cleanConfirm
+
+	// If not forced/confirmed, ask if interactive, or dry-run if scripted
+	if !shouldExecute {
+		// Check if we are in an interactive terminal
+		isTerminal := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+
+		if !isTerminal {
+			fmt.Println("\n  ── DRY RUN (No --force or --confirm flag provided in non-interactive mode) ──")
+			fmt.Println("  Use --confirm to execute this cleaning in scripts.")
+			fmt.Println()
+			return nil
+		}
+
+		// Ask for confirmation in interactive mode
+		label := "Proceed with cleaning?"
 		if deep {
 			label = "⚠️  Deep clean includes builds & binaries. Proceed?"
 		}
@@ -147,9 +165,11 @@ func runClean(cmd *cobra.Command, args []string) error {
 		input, _ := reader.ReadString('\n')
 		input = strings.TrimSpace(strings.ToLower(input))
 		if input != "y" && input != "yes" {
-			fmt.Println("  Aborted.")
+			fmt.Println("  Aborted. No files were deleted.")
+			fmt.Println()
 			return nil
 		}
+		shouldExecute = true
 	}
 
 	// Clean

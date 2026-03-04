@@ -12,12 +12,14 @@ Over time, it gets clogged with `node_modules`, stray `build/` folders, forgotte
 
 ## ✨ Features
 
-- 🏎️ **Blazingly Fast:** Written in Go, it scans massive directory trees concurrently in milliseconds.
+- 🏎️ **Blazingly Fast:** Written in Go, it scans massive directory trees concurrently using a high-performance worker pool for Git checks and size calculations.
 - 🧠 **Context-Aware Engine:** Doesn't just blindly delete folders. It looks for triggers (e.g., `package.json`, `Cargo.toml`) to identify project types and *only* targets known safe artifacts for that specific ecosystem.
-- 🔍 **`.gitignore` Intelligence:** Kessler goes beyond static rules — it dynamically queries Git to discover ignored directories unique to *your* project. Custom data folders, generated output, experiment logs — if Git ignores it and Kessler's rules don't already cover it, it surfaces as a "User Ignored" artifact you can optionally clean. Individual files like `.env` and lockfiles are **never** touched.
+- 🔍 **`.gitignore` & `.kesslerignore` Intelligence:** Kessler dynamically queries Git to discover ignored directories unique to *your* project. Want to skip a folder entirely? Just drop a `.kesslerignore` file in it, and Kessler will bypass that subtree.
 - 🛡️ **The Git Safety Net:** Before Kessler flags *any* folder as junk, it silently queries Git (`git ls-files`). If a folder contains files actively tracked by version control, Kessler immediately aborts and ignores it.
+- 🌍 **Global Cache Management:** Beyond project-level debris, Kessler identifies and safely cleans system-level caches for **Docker**, **Homebrew**, **npm**, **Cargo**, **Go modules**, and more, using native CLI commands where possible.
 - ♻️ **OS Trash Integration:** Mistakes happen. Instead of using a terrifying `rm -rf`, Kessler safely moves debris to your native OS Trash/Recycle Bin (supports macOS, Windows, and Linux), giving you an "Undo" button.
-- 🎨 **Beautiful TUI & Telemetry:** Powered by Charmbracelet's Bubble Tea. Features an interactive dashboard with live "Orbital Telemetry," ecosystem icons, root drive usage, and visual space tracking.
+- 🎨 **Beautiful TUI & Telemetry:** Powered by Charmbracelet's Bubble Tea. Features an interactive dashboard with live "Orbital Telemetry," ecosystem icons, root drive usage, and tabbed views for Projects, Global Caches, and History.
+- 📜 **Scan History:** Keeps track of your previous sweeps and total space freed, helping you monitor your disk's "orbital health" over time.
 - 🤖 **CI / Scripting Mode:** Use `kessler scan` and `kessler clean` subcommands for non-interactive usage in cron jobs, CI pipelines, and shell scripts. Supports JSON output, dry-run, and filtering by size and age.
 - 🔧 **Custom User Rules:** Extend the built-in rules engine with your own `~/.config/kessler/rules.yaml` — add new ecosystems or extra targets without forking.
 
@@ -95,6 +97,9 @@ kessler . --deep        # Include build outputs (dist, build, bin)
 | `i` | Toggle gitignored artifacts |
 | `s` | Sort by Size ↔ Name |
 | `/` | Search projects |
+| `p` | Toggle full Project Preview |
+| `1` / `2` / `3` | Switch tabs (Projects / Global / History) |
+| `Tab` | Cycle through tabs |
 | `Enter` | Move selected to Trash |
 | `X` | Permanently delete |
 | `q` | Quit |
