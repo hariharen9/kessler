@@ -53,7 +53,7 @@ func getGlobalCacheList() []GlobalCache {
 		{
 			Name:         "npm",
 			Description:  "Node.js package download cache",
-			Path:         filepath.Join(home, ".npm", "_cacache"),
+			Path:         npmCachePath(home),
 			CleanCommand: "npm cache clean --force",
 			Icon:         "📦",
 		},
@@ -67,7 +67,7 @@ func getGlobalCacheList() []GlobalCache {
 		{
 			Name:         "pnpm",
 			Description:  "pnpm content-addressable store",
-			Path:         filepath.Join(home, ".local", "share", "pnpm", "store"),
+			Path:         pnpmCachePath(home),
 			CleanCommand: "pnpm store prune",
 			Icon:         "📦",
 		},
@@ -81,7 +81,7 @@ func getGlobalCacheList() []GlobalCache {
 		{
 			Name:         "Go Modules",
 			Description:  "Go module download cache",
-			Path:         filepath.Join(home, "go", "pkg", "mod", "cache"),
+			Path:         goCachePath(home),
 			CleanCommand: "go clean -modcache",
 			Icon:         "🐹",
 		},
@@ -98,6 +98,41 @@ func getGlobalCacheList() []GlobalCache {
 			Path:         filepath.Join(home, ".cargo", "registry", "cache"),
 			CleanCommand: "cargo cache --autoclean",
 			Icon:         "🦀",
+		},
+		{
+			Name:         "Bun",
+			Description:  "Bun global package cache",
+			Path:         filepath.Join(home, ".bun", "install", "cache"),
+			CleanCommand: "bun pm cache rm",
+			Icon:         "🥟",
+		},
+		{
+			Name:         "Nix",
+			Description:  "Nix package store (requires sudo for GC)",
+			Path:         "/nix/store",
+			CleanCommand: "nix-collect-garbage -d",
+			Icon:         "❄️",
+		},
+		{
+			Name:         "Vagrant",
+			Description:  "Vagrant box cache",
+			Path:         filepath.Join(home, ".vagrant.d", "boxes"),
+			CleanCommand: "vagrant box prune",
+			Icon:         "📦",
+		},
+		{
+			Name:         "Composer",
+			Description:  "PHP Composer cache",
+			Path:         composerCachePath(home),
+			CleanCommand: "composer clear-cache",
+			Icon:         "🐘",
+		},
+		{
+			Name:         "Maven",
+			Description:  "Maven local repository",
+			Path:         filepath.Join(home, ".m2", "repository"),
+			CleanCommand: "rm -rf ~/.m2/repository",
+			Icon:         "🪶",
 		},
 	}
 
@@ -239,6 +274,29 @@ func CleanGlobalCache(cache GlobalCache) error {
 			return exec.Command("docker", "system", "prune", "-f").Run()
 		}
 		return nil // No fallback for Docker
+	case "Bun":
+		if cmdExists("bun") {
+			return exec.Command("bun", "pm", "cache", "rm").Run()
+		}
+	case "Nix":
+		if cmdExists("nix-collect-garbage") {
+			return exec.Command("nix-collect-garbage", "-d").Run()
+		}
+	case "Vagrant":
+		if cmdExists("vagrant") {
+			return exec.Command("vagrant", "global-status", "--prune").Run()
+		}
+	case "Cargo":
+		if cmdExists("cargo") {
+			// Cargo cache clean requires an external plugin (cargo-cache), fallback to removing dir if plugin doesn't exist
+			if err := exec.Command("cargo", "cache", "--autoclean").Run(); err == nil {
+				return nil
+			}
+		}
+	case "Composer":
+		if cmdExists("composer") {
+			return exec.Command("composer", "clear-cache").Run()
+		}
 	}
 
 	// Fallback: remove directory contents
@@ -248,13 +306,49 @@ func CleanGlobalCache(cache GlobalCache) error {
 func yarnCachePath(home string) string {
 	if runtime.GOOS == "darwin" {
 		return filepath.Join(home, "Library", "Caches", "Yarn")
+	} else if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "Yarn", "Cache")
 	}
 	return filepath.Join(home, ".cache", "yarn")
+}
+
+func npmCachePath(home string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "npm-cache")
+	}
+	return filepath.Join(home, ".npm", "_cacache")
+}
+
+func pnpmCachePath(home string) string {
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "pnpm", "store")
+	} else if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "pnpm", "store")
+	}
+	return filepath.Join(home, ".local", "share", "pnpm", "store")
+}
+
+func goCachePath(home string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(home, "go", "pkg", "mod", "cache") // Windows usually uses GOPATH\pkg\mod or LOCALAPPDATA\go-build
+	}
+	return filepath.Join(home, "go", "pkg", "mod", "cache")
+}
+
+func composerCachePath(home string) string {
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "Caches", "composer")
+	} else if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "Composer")
+	}
+	return filepath.Join(home, ".cache", "composer")
 }
 
 func pipCachePath(home string) string {
 	if runtime.GOOS == "darwin" {
 		return filepath.Join(home, "Library", "Caches", "pip")
+	} else if runtime.GOOS == "windows" {
+		return filepath.Join(os.Getenv("LOCALAPPDATA"), "pip", "Cache")
 	}
 	return filepath.Join(home, ".cache", "pip")
 }

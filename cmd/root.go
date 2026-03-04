@@ -19,7 +19,7 @@ var UserRulesData []byte
 var deep bool
 
 var rootCmd = &cobra.Command{
-	Use:   "kessler [path]",
+	Use:   "kessler [paths...]",
 	Short: "🛰️ Kessler — Clear the orbital debris from your filesystem",
 	Long: `Kessler is an intelligent, blazingly fast CLI tool that finds and safely
 sweeps away runtime artifacts and build caches (node_modules, __pycache__,
@@ -27,21 +27,21 @@ target/, etc.) without ever touching your source code.
 
 Run without a subcommand to launch the interactive TUI dashboard.
 Custom rules can be added at ~/.config/kessler/rules.yaml`,
-	Args: cobra.MaximumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		loadUserRules()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		scanPath := "."
+		scanPaths := []string{"."}
 		if len(args) > 0 {
-			scanPath = args[0]
+			scanPaths = args
 		}
 
 		// For the TUI, we pass both base and user rules.
 		// The TUI's scanner will need to use NewScannerMerged.
 		// For now, we pre-merge and pass the base rules (TUI uses NewScanner internally).
 		// We update the TUI to accept user rules separately.
-		p := tea.NewProgram(tui.InitialModel(scanPath, deep, RulesData, UserRulesData), tea.WithAltScreen())
+		p := tea.NewProgram(tui.InitialModel(scanPaths, deep, RulesData, UserRulesData), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
 		}

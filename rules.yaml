@@ -110,7 +110,24 @@ rules:
     targets:
       - path: "vendor"
         tier: "safe"
-      # (Note: Go binaries are usually root level, handled by global extensions)
+      - path: "bin"
+        tier: "deep"
+      - path: "dist"
+        tier: "deep"
+      - path: "build"
+        tier: "deep"
+      - path: "*.test"
+        tier: "deep"
+      - path: "coverage.out"
+        tier: "safe"
+      - path: "coverage.txt"
+        tier: "safe"
+      - path: "cover.out"
+        tier: "safe"
+      - path: "c.out"
+        tier: "safe"
+      - path: ".gocache"
+        tier: "safe"
 
   # ---------------------------------------------------------
   # JAVA / JVM
@@ -180,6 +197,171 @@ rules:
       - path: "cdk.out"
         tier: "safe"
       - path: ".serverless"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # SWIFT / iOS
+  # ---------------------------------------------------------
+  - name: "Swift / iOS"
+    triggers: ["Package.swift", "*.xcodeproj", "*.xcworkspace"]
+    targets:
+      - path: ".build"
+        tier: "safe"
+      - path: "DerivedData"
+        tier: "deep"
+      - path: "build"
+        tier: "safe"
+      - path: "Pods"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # UNREAL ENGINE
+  # ---------------------------------------------------------
+  - name: "Unreal Engine"
+    triggers: ["*.uproject"]
+    targets:
+      - path: "Binaries"
+        tier: "deep"
+      - path: "Build"
+        tier: "deep"
+      - path: "Intermediate"
+        tier: "safe"
+      - path: "Saved"
+        tier: "safe"
+      - path: "DerivedDataCache"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # GODOT
+  # ---------------------------------------------------------
+  - name: "Godot"
+    triggers: ["project.godot"]
+    targets:
+      - path: ".godot"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # ANDROID
+  # ---------------------------------------------------------
+  - name: "Android"
+    triggers: ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+    targets:
+      - path: ".gradle"
+        tier: "safe"
+      - path: "build"
+        tier: "safe"
+      - path: ".cxx"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # R
+  # ---------------------------------------------------------
+  - name: "R"
+    triggers: ["*.Rproj", "DESCRIPTION"]
+    targets:
+      - path: ".Rproj.user"
+        tier: "safe"
+      - path: ".Rhistory"
+        tier: "safe"
+      - path: ".RData"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # LATEX
+  # ---------------------------------------------------------
+  - name: "LaTeX"
+    triggers: ["*.tex"]
+    targets:
+      - path: "*.aux"
+        tier: "safe"
+      - path: "*.log"
+        tier: "safe"
+      - path: "*.out"
+        tier: "safe"
+      - path: "*.toc"
+        tier: "safe"
+      - path: "*.fls"
+        tier: "safe"
+      - path: "*.fdb_latexmk"
+        tier: "safe"
+      - path: "*.synctex.gz"
+        tier: "safe"
+      - path: "*.bbl"
+        tier: "safe"
+      - path: "*.blg"
+        tier: "safe"
+      - path: "*.xdv"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # SCALA
+  # ---------------------------------------------------------
+  - name: "Scala"
+    triggers: ["build.sbt"]
+    targets:
+      - path: "target"
+        tier: "safe"
+      - path: "project/target"
+        tier: "safe"
+      - path: "project/project"
+        tier: "safe"
+      - path: ".bsp"
+        tier: "safe"
+      - path: ".metals"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # HASKELL
+  # ---------------------------------------------------------
+  - name: "Haskell"
+    triggers: ["*.cabal", "package.yaml", "stack.yaml"]
+    targets:
+      - path: "dist"
+        tier: "deep"
+      - path: "dist-newstyle"
+        tier: "safe"
+      - path: ".stack-work"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # ZIG
+  # ---------------------------------------------------------
+  - name: "Zig"
+    triggers: ["build.zig"]
+    targets:
+      - path: "zig-cache"
+        tier: "safe"
+      - path: "zig-out"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # FLUTTER
+  # ---------------------------------------------------------
+  - name: "Flutter"
+    triggers: ["pubspec.yaml"]
+    targets:
+      - path: "build"
+        tier: "safe"
+      - path: ".dart_tool"
+        tier: "safe"
+      - path: ".pub-cache"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # C / C++
+  # ---------------------------------------------------------
+  - name: "C / C++"
+    triggers: ["CMakeLists.txt", "Makefile", "*.vcxproj"]
+    targets:
+      - path: "build"
+        tier: "safe"
+      - path: "out"
+        tier: "safe"
+      - path: "bin"
+        tier: "deep"
+      - path: "obj"
+        tier: "safe"
+      - path: ".cache"
         tier: "safe"
 
   # ---------------------------------------------------------

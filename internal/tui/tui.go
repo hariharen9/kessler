@@ -53,7 +53,7 @@ type UIModel struct {
 	cursor             int
 	selected           map[string]struct{} // Keyed by project path to persist across filters
 	freedSpace         int64
-	scanPath           string
+	scanPaths          []string
 	sortMode           SortMode
 	includeDeep        bool
 	showIgnored        bool
@@ -147,7 +147,7 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func InitialModel(scanPath string, includeDeep bool, rulesData []byte, userRulesData []byte) UIModel {
+func InitialModel(scanPaths []string, includeDeep bool, rulesData []byte, userRulesData []byte) UIModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -163,7 +163,7 @@ func InitialModel(scanPath string, includeDeep bool, rulesData []byte, userRules
 		state:          stateScanning,
 		selected:       make(map[string]struct{}),
 		globalSelected: make(map[int]struct{}),
-		scanPath:       scanPath,
+		scanPaths:      scanPaths,
 		sortMode:       SortSize,
 		includeDeep:    includeDeep,
 		rulesData:      rulesData,
@@ -213,7 +213,7 @@ func (m UIModel) startScan() tea.Cmd {
 		var scanErr error
 
 		go func() {
-			projects, scanErr = scanner.ScanWithProgress(m.scanPath, progress)
+			projects, scanErr = scanner.ScanWithProgress(m.scanPaths, progress)
 			close(progress)
 		}()
 
@@ -652,7 +652,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		engine.SaveEntry(engine.ScanHistoryEntry{
 			Timestamp:    time.Now(),
-			ScanPath:     m.scanPath,
+			ScanPath:     strings.Join(m.scanPaths, ", "),
 			ProjectCount: len(msg.projects),
 			TotalSize:    totalSize,
 		})
@@ -792,7 +792,7 @@ func (m UIModel) View() string {
 					"\n"+
 					"  %s",
 				m.spinner.View(),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(m.scanPath),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(strings.Join(m.scanPaths, ", ")),
 				lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%d", m.scanDirsChecked)),
 				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render(fmt.Sprintf("%d", m.scanProjectsFound)),
 				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(m.scanTotalSize)),

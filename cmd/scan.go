@@ -22,16 +22,15 @@ var (
 )
 
 var scanCmd = &cobra.Command{
-	Use:   "scan [path]",
+	Use:   "scan [paths...]",
 	Short: "Scan for project artifacts and report (no deletion)",
-	Long: `Scan a directory tree for build artifacts, caches, and other debris.
+	Long: `Scan directory trees for build artifacts, caches, and other debris.
 Outputs a table by default, or JSON with --json for scripting.
 
 Examples:
   kessler scan ~/Projects
-  kessler scan ~/Projects --json | jq '.[] | select(.totalSize > 100000000)'
+  kessler scan ~/Projects ~/Work --json | jq '.[] | select(.totalSize > 100000000)'
   kessler scan ~/Projects --deep --older-than 30d --min-size 100MB`,
-	Args: cobra.MaximumNArgs(1),
 	RunE: runScan,
 }
 
@@ -46,9 +45,9 @@ func init() {
 }
 
 func runScan(cmd *cobra.Command, args []string) error {
-	scanPath := "."
+	scanPaths := []string{"."}
 	if len(args) > 0 {
-		scanPath = args[0]
+		scanPaths = args
 	}
 
 	scanner, err := engine.NewScannerMerged(RulesData, UserRulesData)
@@ -56,7 +55,7 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load rules: %w", err)
 	}
 
-	projects, err := scanner.Scan(scanPath)
+	projects, err := scanner.Scan(scanPaths)
 	if err != nil {
 		return fmt.Errorf("scan failed: %w", err)
 	}

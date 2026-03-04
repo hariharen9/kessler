@@ -22,7 +22,7 @@ var (
 )
 
 var cleanCmd = &cobra.Command{
-	Use:   "clean [path]",
+	Use:   "clean [paths...]",
 	Short: "Non-interactively clean project artifacts",
 	Long: `Scan and clean build artifacts without the TUI.
 
@@ -31,10 +31,9 @@ In deep mode (--deep), a Y/n confirmation is shown unless --force is used.
 
 Examples:
   kessler clean ~/Projects
-  kessler clean ~/Projects --deep --force
+  kessler clean ~/Projects ~/Work --deep --force
   kessler clean ~/Projects --older-than 30d --dry-run
   kessler clean ~/Projects --permanent`,
-	Args: cobra.MaximumNArgs(1),
 	RunE: runClean,
 }
 
@@ -50,9 +49,9 @@ func init() {
 }
 
 func runClean(cmd *cobra.Command, args []string) error {
-	scanPath := "."
+	scanPaths := []string{"."}
 	if len(args) > 0 {
-		scanPath = args[0]
+		scanPaths = args
 	}
 
 	scanner, err := engine.NewScannerMerged(RulesData, UserRulesData)
@@ -61,7 +60,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("\n  🛰️  Scanning for debris...")
-	projects, err := scanner.Scan(scanPath)
+	projects, err := scanner.Scan(scanPaths)
 	if err != nil {
 		return fmt.Errorf("scan failed: %w", err)
 	}
@@ -93,7 +92,8 @@ func runClean(cmd *cobra.Command, args []string) error {
 	})
 
 	if len(filtered) == 0 {
-		fmt.Println("  No project artifacts match the current filters. Orbit is clear! 🛰️\n")
+		fmt.Println("  No project artifacts match the current filters. Orbit is clear! 🛰️")
+		fmt.Println()
 		return nil
 	}
 
@@ -125,7 +125,8 @@ func runClean(cmd *cobra.Command, args []string) error {
 
 	// Dry run: stop here
 	if cleanDryRun {
-		fmt.Println("\n  ── DRY RUN (no files were deleted) ──\n")
+		fmt.Println("\n  ── DRY RUN (no files were deleted) ──")
+		fmt.Println()
 		return nil
 	}
 
@@ -189,7 +190,8 @@ func runClean(cmd *cobra.Command, args []string) error {
 	if failedCount > 0 {
 		fmt.Printf(" (%d failed)", failedCount)
 	}
-	fmt.Println("\n")
+	fmt.Println()
+	fmt.Println()
 
 	// Offer fallback for failed trash items
 	if failedCount > 0 && !cleanPermanent {
