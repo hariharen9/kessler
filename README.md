@@ -44,9 +44,9 @@ scoop install kessler
 ### npm (All platforms)
 
 ```bash
-npm install -g kessler
+npm install -g kessler-cli
 # or use without installing
-npx kessler ~/Projects
+npx kessler-cli ~/Projects
 ```
 
 ### AUR (Arch Linux)
@@ -130,6 +130,30 @@ kessler clean ~/Projects --dry-run               # Preview only, no deletion
 kessler clean ~/Projects --permanent             # rm -rf instead of trash
 kessler clean ~/Projects --older-than 30d --force  # Cron job friendly
 ```
+
+---
+
+## 🛰️ Kessler vs. Kondo
+
+While tools like **Kondo** or **npkill** are great for basic cleaning, Kessler is engineered as a **Safety-First Disk Management Dashboard** for polyglot developers.
+
+| Feature | Kondo | **Kessler** |
+|:---|:---:|:---:|
+| **The Git Safety Net** | ❌ No | ✅ **Yes** (`git ls-files` check) |
+| **Global Cache Cleaning** | ❌ No | ✅ **Yes** (npm, pip, go, docker, etc.) |
+| **Tiered Cleaning** | ❌ No | ✅ **Yes** (Safe vs. Deep mode) |
+| **`.gitignore` Scanning** | ❌ No | ✅ **Yes** (Finds hidden ignored dirs) |
+| **High-Fidelity TUI** | ⚠️ Basic | ✅ **Yes** (Modern Charm/Bubble Tea) |
+| **OS Trash Integration** | ✅ Yes | ✅ **Yes** (+ Windows PowerShell support) |
+| **Scan History** | ❌ No | ✅ **Yes** (Track space freed over time) |
+| **CI / Scripting Mode** | ⚠️ Limited | ✅ **Yes** (JSON output + rich filters) |
+
+### What more does it do?
+
+1. **System-Level Awareness:** Kessler doesn't just clean projects; it cleans your system. It detects and cleans global package caches for **Docker**, **Homebrew**, **npm**, **Cargo**, **Go**, **pip**, **pnpm**, **Bun**, and more.
+2. **True Git Intelligence:** Most cleaners blindly delete any folder named `bin` or `dist`. Kessler uses `git ls-files` to verify a folder's track status. If you've intentionally committed a binary to Git, Kessler respects your decision and skips it.
+3. **Advanced Filtering:** Beyond simple directory name matching, Kessler can filter by **minimum size** (e.g., `> 100MB`) and **last modified age** (e.g., `> 30 days`), allowing you to target only the stalest debris in large monorepos.
+4. **Interactive Dashboard:** Instead of a simple list, Kessler provides a tabbed TUI with live telemetry, disk usage bars, and a full **Project Preview** that lets you explore the file tree of an artifact before hitting delete.
 
 ---
 
