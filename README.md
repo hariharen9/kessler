@@ -1,13 +1,13 @@
 # 🛰️ Kessler
 
 <p align="center">
-  <img src="https://img.shields.io/github/v/release/hariharen9/kessler?style=flat-square" alt="Release">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/hariharen9/kessler?style=flat-square" alt="License"></a>
-  <img src="https://img.shields.io/github/stars/hariharen9/kessler?style=flat-square" alt="Stars">
-  <a href="https://goreportcard.com/report/github.com/hariharen9/kessler"><img src="https://goreportcard.com/badge/github.com/hariharen9/kessler?style=flat-square" alt="Go Report Card"></a>
-  <img src="https://img.shields.io/github/actions/workflow/status/hariharen9/kessler/release.yml?style=flat-square" alt="Build Status">
-  <img src="https://img.shields.io/github/go-mod/go-version/hariharen9/kessler?style=flat-square" alt="Go Version">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey?style=flat-square" alt="Platform Support">
+  <img src="https://img.shields.io/github/v/release/hariharen9/kessler?style=for-the-badge&color=00ADD8&logo=go&logoColor=white" alt="Release">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/github/stars/hariharen9/kessler?style=for-the-badge&color=E3B341&logo=github&logoColor=white" alt="Stars">
+  <a href="https://goreportcard.com/report/github.com/hariharen9/kessler"><img src="https://goreportcard.com/badge/github.com/hariharen9/kessler?style=for-the-badge" alt="Go Report Card"></a>
+  <img src="https://img.shields.io/github/actions/workflow/status/hariharen9/kessler/release.yml?style=for-the-badge&logo=github-actions&logoColor=white" alt="Build Status">
+  <img src="https://img.shields.io/github/go-mod/go-version/hariharen9/kessler?style=for-the-badge&logo=go&logoColor=white" alt="Go Version">
+  <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Platform Support">
 </p>
 
 > **Kessler Syndrome** (noun): A theoretical scenario in which the density of objects in low Earth orbit is high enough that collisions between objects could cause a cascade, generating space debris that increases the likelihood of further collisions, rendering space exploration impossible.
@@ -23,68 +23,86 @@ Over time, it gets clogged with `node_modules`, `targets`, stray `build/` folder
 ## ✨ Features
 
 - 🏎️ **Blazingly Fast:** Scans massive directory trees concurrently using a high-performance Go worker pool.
-- 🛡️ **Active Project Protection:** Warns you before cleaning if a project's dev server is currently running.
-- 🚀 **Project Launchpad:** A built-in navigator to fuzzy-search and instantly open projects in VS Code, Cursor, or Terminal.
-- 🧪 **Environmental Doctor:** Identifies and cleans unused versions of toolchains (Node.js, Rust, Python, Ruby, Java, etc.).
 - 🔍 **Context-Aware Engine:** Targets known safe artifacts based on project triggers (e.g., `package.json`, `Cargo.toml`).
 - 🛡️ **Git Safety Net:** Silently queries `git ls-files` to guarantee actively tracked files are never deleted.
 - 🌍 **Global Cache Management:** Safely cleans system-level caches (Docker, Homebrew, npm, Cargo, Go modules).
 - ♻️ **OS Trash Integration:** Moves debris to your native OS Trash/Recycle Bin instead of a permanent `rm -rf`.
-- 🎨 **Beautiful TUI & Telemetry:** An interactive Charmbracelet dashboard with 4 tabbed views and live "Orbital Telemetry".
+- 🛡️ **Active Project Protection:** Warns you before cleaning if a project's dev server is currently running.
+- 🧪 **Environmental Doctor:** Identifies and cleans unused versions of toolchains (Node.js, Rust, Python, Ruby, Java, etc.).
+- 🚀 **Project Launchpad:** A built-in navigator to fuzzy-search and instantly open projects in VS Code, Cursor, or Terminal.
 - 📜 **Scan History:** Tracks previous sweeps and total space freed to monitor your disk's health over time.
 - 🤖 **CI / Scripting Mode:** Non-interactive `scan` and `clean` subcommands with JSON output, dry-run, and filtering.
+- 🎨 **Beautiful TUI & Telemetry:** An interactive Charmbracelet dashboard with 4 tabbed views and live "Orbital Telemetry".
 
 ---
 
 ## 🚀 Installation
 
-### Homebrew (macOS & Linux)
+<table width="100%">
+  <tr>
+    <td width="25%">🍺 <b>Homebrew</b><br><sup>macOS & Linux</sup></td>
+    <td>
 
 ```bash
 brew tap hariharen9/tap
 brew install kessler
 ```
-
-### Scoop (Windows)
+</td>
+  </tr>
+  <tr>
+    <td>🪟 <b>Scoop</b><br><sup>Windows</sup></td>
+    <td>
 
 ```powershell
 scoop bucket add hariharen9 https://github.com/hariharen9/scoop-bucket
 scoop install kessler
 ```
-
-### npm (All platforms)
+</td>
+  </tr>
+  <tr>
+    <td>📦 <b>npm</b><br><sup>All Platforms</sup></td>
+    <td>
 
 ```bash
 npm install -g kessler-cli
-# or use without installing
-npx kessler-cli ~/Projects
 ```
-
-### AUR (Arch Linux)
-
-```bash
-yay -S kessler-bin
-```
-
-### Debian / Ubuntu (.deb)
-
-Download the `.deb` from the [latest release](https://github.com/hariharen9/kessler/releases/latest), then:
-
-```bash
-sudo dpkg -i kessler_*.deb
-```
-
-### Go Install
+</td>
+  </tr>
+  <tr>
+    <td>🐹 <b>Go</b><br><sup>From Source</sup></td>
+    <td>
 
 ```bash
 go install github.com/hariharen9/kessler@latest
 ```
+</td>
+  </tr>
+  <tr>
+    <td>📦 <b>Debian / Ubuntu</b><br><sup>.deb Package</sup></td>
+    <td>Download the <code>.deb</code> from the <a href="https://github.com/hariharen9/kessler/releases/latest">latest release</a>, then:<br>
+
+```bash
+sudo dpkg -i kessler_*.deb
+```
+</td>
+  </tr>
+  <tr>
+    <td>🐧 <b>AUR</b><br><sup>Arch Linux</sup></td>
+    <td>
+
+```bash
+yay -S kessler-bin
+```
+</td>
+  </tr>
+</table>
 
 ---
 
 ## 🎮 Usage
 
-### Interactive TUI (Default)
+<details open>
+<summary><b>🕹️ Interactive TUI (Default)</b></summary>
 
 Run Kessler without a subcommand to launch the interactive dashboard.
 
@@ -114,7 +132,10 @@ kessler .               # Scan the current directory
 | `X` | Permanently delete |
 | `q` | Quit |
 
-### Non-Interactive / CI Mode
+</details>
+
+<details>
+<summary><b>🤖 Non-Interactive / CI Mode</b></summary>
 
 #### `kessler scan`
 
@@ -135,23 +156,7 @@ kessler clean ~/Projects --deep                  # Deep clean
 kessler clean ~/Projects --force                 # Skip confirmation + safety checks
 ```
 
----
-
-## 🛰️ Kessler vs. Kondo
-
-While tools like **Kondo** or **npkill** are great for basic cleaning, Kessler is engineered as a **Safety-First Disk Management Dashboard** for polyglot developers.
-
-| Feature | Kondo | **Kessler** |
-|:---|:---:|:---:|
-| **The Git Safety Net** | ❌ No | ✅ **Yes** (`git ls-files` check) |
-| **Active Project Protection**| ❌ No | ✅ **Yes** (Warns if dev server is running) |
-| **Project Launchpad** | ❌ No | ✅ **Yes** (Tab 4 Project Navigator) |
-| **Environmental Doctor** | ❌ No | ✅ **Yes** (Detects unused toolchains) |
-| **Global Cache Cleaning** | ❌ No | ✅ **Yes** (npm, pip, go, docker, etc.) |
-| **Tiered Cleaning** | ❌ No | ✅ **Yes** (Safe vs. Deep mode) |
-| **`.gitignore` Scanning** | ❌ No | ✅ **Yes** (Finds hidden ignored dirs) |
-| **High-Fidelity TUI** | ⚠️ Basic | ✅ **Yes** (Modern Charm/Bubble Tea) |
-| **OS Trash Integration** | ✅ Yes | ✅ **Yes** (+ Windows PowerShell support) |
+</details>
 
 ---
 
@@ -242,6 +247,25 @@ Kessler is built with **developer trust** as its core tenet:
 3. **It respects State:** It never targets files required to reproduce a build (like lockfiles) or environment secrets (like `.env`).
 4. **It respects the OS:** Moving files to the Trash Bin instead of permanent deletion gives you an "Undo" button.
 
+
+---
+
+## 🛰️ Kessler vs. The Alternatives
+
+While tools like **Kondo**, **npkill**, or ecosystem-specific commands like `cargo clean` are great for basic cleaning, Kessler is engineered as a **Safety-First, Polyglot Disk Management Dashboard**.
+
+| Feature | cargo clean | npkill | Kondo | **Kessler** |
+|:---|:---:|:---:|:---:|:---:|
+| **Ecosystem Support** | Single (Rust) | Single (Node) | Polyglot | ✅ **Polyglot (30+)** |
+| **The Git Safety Net** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (`git ls-files`) |
+| **Active Project Protection**| ❌ No | ❌ No | ❌ No | ✅ **Yes** (Warns on running PIDs) |
+| **Environmental Doctor** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (Detects unused toolchains) |
+| **Global Cache Cleaning** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (npm, docker, homebrew) |
+| **Tiered Cleaning** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (Safe vs. Deep mode) |
+| **`.gitignore` Scanning** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (Finds hidden ignored dirs) |
+| **High-Fidelity TUI** | ❌ No | ✅ Yes | ⚠️ Basic | ✅ **Yes** (Modern Bubble Tea) |
+| **OS Trash Integration** | ❌ No | ❌ No | ✅ Yes | ✅ **Yes** (+ Windows support) |
+| **Project Launchpad** | ❌ No | ❌ No | ❌ No | ✅ **Yes** (Fuzzy-search & Open) |
 
 ---
 
