@@ -185,6 +185,8 @@ rules:
         tier: "safe"
       - path: "_build"
         tier: "safe"
+      - path: ".elixir_ls"
+        tier: "safe"
 
   # ---------------------------------------------------------
   # INFRASTRUCTURE AS CODE (IaC) & CLOUD
@@ -374,6 +376,44 @@ rules:
       - path: "obj"
         tier: "safe"
       - path: ".cache"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # OCAML
+  # ---------------------------------------------------------
+  - name: "OCaml"
+    triggers: ["dune-project"]
+    targets:
+      - path: "_build"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # ASTRO
+  # ---------------------------------------------------------
+  - name: "Astro"
+    triggers: ["astro.config.mjs", "astro.config.ts", "astro.config.js"]
+    targets:
+      - path: ".astro"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # DOCUSAURUS
+  # ---------------------------------------------------------
+  - name: "Docusaurus"
+    triggers: ["docusaurus.config.js", "docusaurus.config.ts"]
+    targets:
+      - path: ".docusaurus"
+        tier: "safe"
+
+  # ---------------------------------------------------------
+  # NX WORKSPACES
+  # ---------------------------------------------------------
+  - name: "Nx"
+    triggers: ["nx.json"]
+    targets:
+      - path: ".nx/cache"
+        tier: "safe"
+      - path: ".nx/workspace-data"
         tier: "safe"
 
   # ---------------------------------------------------------
