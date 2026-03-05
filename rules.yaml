@@ -187,16 +187,28 @@ rules:
         tier: "safe"
 
   # ---------------------------------------------------------
-  # INFRASTRUCTURE AS CODE (IaC)
+  # INFRASTRUCTURE AS CODE (IaC) & CLOUD
   # ---------------------------------------------------------
-  - name: "Terraform / IaC"
-    triggers: ["*.tf", "cdk.json", "serverless.yml"]
+  - name: "Cloud / IaC"
+    triggers: ["*.tf", "cdk.json", "serverless.yml", "amplify", "supabase", "wrangler.toml"]
     targets:
       - path: ".terraform"
         tier: "safe"
       - path: "cdk.out"
         tier: "safe"
       - path: ".serverless"
+        tier: "safe"
+      - path: ".aws-sam"
+        tier: "safe"
+      - path: ".amplify"
+        tier: "safe"
+      - path: ".wrangler"
+        tier: "safe"
+      - path: "supabase/.temp"
+        tier: "safe"
+      - path: ".sst"
+        tier: "safe"
+      - path: ".open-next"
         tier: "safe"
 
   # ---------------------------------------------------------

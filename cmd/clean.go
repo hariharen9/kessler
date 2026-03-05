@@ -179,6 +179,38 @@ func runClean(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("\n  🧹 Cleaning %d artifacts (%s)...\n\n", len(artifacts), method)
 
+	// Check for active processes across all projects being cleaned
+	var activeProcsFound bool
+	for _, p := range filtered {
+		procs := engine.GetActiveProcessesInPath(p.Path)
+		if len(procs) > 0 {
+			activeProcsFound = true
+			fmt.Printf("  ⚠️  ACTIVE PROCESSES in %s:\n", filepath.Base(p.Path))
+			for _, proc := range procs {
+				fmt.Printf("     └─ %s (PID: %d)\n", proc.Name, proc.PID)
+			}
+		}
+	}
+
+	if activeProcsFound && !cleanForce {
+		isTerminal := isatty.IsTerminal(os.Stdin.Fd()) || isatty.IsCygwinTerminal(os.Stdin.Fd())
+		if isTerminal {
+			fmt.Printf("\n  ⚠️  Proceed with cleaning active projects? [y/N] ")
+			reader := bufio.NewReader(os.Stdin)
+			input, _ := reader.ReadString('\n')
+			input = strings.TrimSpace(strings.ToLower(input))
+			if input != "y" && input != "yes" {
+				fmt.Println("  Aborted. No files were deleted.")
+				fmt.Println()
+				return nil
+			}
+		} else {
+			fmt.Println("\n  ❌ Error: Active processes detected. Use --force to clean anyway in non-interactive mode.")
+			fmt.Println()
+			return nil
+		}
+	}
+
 	var freedSpace int64
 	var failedCount int
 	var failedPaths []string

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ const (
 	stateScanning state = iota
 	stateResults
 	stateConfirmNuke
+	stateConfirmActive
 	stateCleaning
 	stateConfirmFallback
 	stateDone
@@ -42,6 +45,7 @@ const (
 	tabProjects tabIndex = iota
 	tabGlobal
 	tabHistory
+	tabLaunchpad
 )
 
 type UIModel struct {
@@ -69,6 +73,10 @@ type UIModel struct {
 
 	// Post-clean feedback
 	lastFreedSpace int64
+	wasNukeRequest bool
+
+	// Active project detection
+	activeProjects map[string][]engine.ActiveProcess // Keyed by project path
 
 	// Configuration
 	rulesData     []byte
@@ -100,6 +108,9 @@ type UIModel struct {
 	globalTotal        int
 	globalCurrentCache string
 	globalTotalSize    int64
+
+	// Environmental Doctor (Tab 2)
+	toolchains []engine.Toolchain
 }
 
 type cleanStepMsg struct {
@@ -164,6 +175,7 @@ func InitialModel(scanPaths []string, includeDeep bool, rulesData []byte, userRu
 		state:          stateScanning,
 		selected:       make(map[string]struct{}),
 		globalSelected: make(map[int]struct{}),
+		activeProjects: make(map[string][]engine.ActiveProcess),
 		scanPaths:      scanPaths,
 		sortMode:       SortSize,
 		includeDeep:    includeDeep,
@@ -405,6 +417,19 @@ func (m UIModel) getFilteredProjects() []engine.Project {
 	return filtered
 }
 
+func (m *UIModel) checkActiveProjects() bool {
+	m.activeProjects = make(map[string][]engine.ActiveProcess)
+	found := false
+	for path := range m.selected {
+		procs := engine.GetActiveProcessesInPath(path)
+		if len(procs) > 0 {
+			m.activeProjects[path] = procs
+			found = true
+		}
+	}
+	return found
+}
+
 func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
@@ -430,6 +455,24 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0 // Reset cursor when search changes
 				return m, cmd
 			}
+		}
+
+		if m.state == stateConfirmActive {
+			switch strings.ToLower(msg.String()) {
+			case "y":
+				if m.wasNukeRequest {
+					m.state = stateConfirmNuke
+				} else {
+					m.state = stateCleaning
+					m.permanent = false
+					return m, m.startCleaning()
+				}
+				return m, nil
+			case "n", "esc", "q":
+				m.state = stateResults
+				return m, nil
+			}
+			return m, nil
 		}
 
 		if m.state == stateConfirmNuke {
@@ -487,10 +530,14 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.state == stateResults && m.activeTab == tabProjects && m.cursor > 0 {
-				m.cursor--
-			} else if m.state == stateResults && m.activeTab == tabGlobal && m.globalCursor > 0 {
-				m.globalCursor--
+			if m.state == stateResults {
+				if m.activeTab == tabProjects && m.cursor > 0 {
+					m.cursor--
+				} else if m.activeTab == tabGlobal && m.globalCursor > 0 {
+					m.globalCursor--
+				} else if m.activeTab == tabLaunchpad && m.cursor > 0 {
+					m.cursor--
+				}
 			}
 		case "down", "j":
 			if m.state == stateResults && m.showPreviewModal {
@@ -513,20 +560,36 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
-			if m.state == stateResults && m.activeTab == tabProjects {
-				filtered := m.getFilteredProjects()
-				if m.cursor < len(filtered)-1 {
-					m.cursor++
-				}
-			} else if m.state == stateResults && m.activeTab == tabGlobal {
-				if m.globalCursor < len(m.globalCaches)-1 {
-					m.globalCursor++
+			if m.state == stateResults {
+				if m.activeTab == tabProjects || m.activeTab == tabLaunchpad {
+					filtered := m.getFilteredProjects()
+					if m.cursor < len(filtered)-1 {
+						m.cursor++
+					}
+				} else if m.activeTab == tabGlobal {
+					if m.globalCursor < len(m.globalCaches)-1 {
+						m.globalCursor++
+					}
 				}
 			}
 		case "/":
 			if m.state == stateResults {
 				m.textInput.Focus()
 				return m, textinput.Blink
+			}
+		case "o": // Open in VS Code
+			if m.state == stateResults && m.activeTab == tabLaunchpad {
+				filtered := m.getFilteredProjects()
+				if len(filtered) > 0 && m.cursor < len(filtered) {
+					path := filtered[m.cursor].Path
+					if runtime.GOOS == "windows" {
+						exec.Command("cmd", "/c", "code", path).Run()
+						exec.Command("cmd", "/c", "cursor", path).Run()
+					} else {
+						exec.Command("code", path).Run()
+						exec.Command("cursor", path).Run()
+					}
+				}
 			}
 		case "s": // Toggle sorting
 			if m.state == stateResults {
@@ -537,10 +600,26 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.cursor = 0
 			}
-		case "t": // Toggle Tiers (Safe vs Deep)
+		case "t": // Open in Terminal (Launchpad) OR Toggle Tiers (Projects)
 			if m.state == stateResults {
-				m.includeDeep = !m.includeDeep
-				m.cursor = 0 // Reset cursor as list changes
+				if m.activeTab == tabLaunchpad {
+					filtered := m.getFilteredProjects()
+					if len(filtered) > 0 && m.cursor < len(filtered) {
+						path := filtered[m.cursor].Path
+						if runtime.GOOS == "darwin" {
+							exec.Command("open", "-a", "Terminal", path).Run()
+							exec.Command("open", "-a", "iTerm", path).Run()
+						} else if runtime.GOOS == "windows" {
+							exec.Command("cmd", "/c", "start", "cmd", "/K", "cd /d", path).Run()
+						} else {
+							// Linux: try xdg-open (file manager) or common terminals
+							exec.Command("xdg-open", path).Run()
+						}
+					}
+				} else {
+					m.includeDeep = !m.includeDeep
+					m.cursor = 0 // Reset cursor as list changes
+				}
 			}
 		case "i": // Toggle Ignored files
 			if m.state == stateResults {
@@ -597,8 +676,35 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+		case "e": // Select all of same type
+			if m.state == stateResults && m.activeTab == tabProjects {
+				filtered := m.getFilteredProjects()
+				if len(filtered) > 0 && m.cursor < len(filtered) {
+					targetType := filtered[m.cursor].Type
+					for _, p := range filtered {
+						if p.Type == targetType {
+							m.selected[p.Path] = struct{}{}
+						}
+					}
+				}
+			}
+		case "S": // Select all stale (>30 days)
+			if m.state == stateResults && m.activeTab == tabProjects {
+				filtered := m.getFilteredProjects()
+				staleThreshold := 30 * 24 * time.Hour
+				for _, p := range filtered {
+					if !p.LastModTime.IsZero() && time.Since(p.LastModTime) > staleThreshold {
+						m.selected[p.Path] = struct{}{}
+					}
+				}
+			}
 		case "enter":
 			if m.state == stateResults && m.activeTab == tabProjects && len(m.selected) > 0 {
+				m.wasNukeRequest = false
+				if m.checkActiveProjects() {
+					m.state = stateConfirmActive
+					return m, nil
+				}
 				m.state = stateCleaning
 				m.permanent = false
 				return m, m.startCleaning()
@@ -610,6 +716,11 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "X": // Capital X for Nuke — show confirmation first
 			if m.state == stateResults && m.activeTab == tabProjects && len(m.selected) > 0 {
+				m.wasNukeRequest = true
+				if m.checkActiveProjects() {
+					m.state = stateConfirmActive
+					return m, nil
+				}
 				m.state = stateConfirmNuke
 				return m, nil
 			}
@@ -629,9 +740,13 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateResults {
 				m.activeTab = tabHistory
 			}
+		case "4":
+			if m.state == stateResults {
+				m.activeTab = tabLaunchpad
+			}
 		case "tab":
 			if m.state == stateResults {
-				m.activeTab = (m.activeTab + 1) % 3
+				m.activeTab = (m.activeTab + 1) % 4
 				if m.activeTab == tabGlobal && m.globalCaches == nil && !m.globalScanning {
 					m.globalScanning = true
 					return m, m.scanGlobalCachesCmd()
@@ -672,6 +787,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.projects = msg.projects
 		m.state = stateResults
+		m.toolchains = engine.GetUnusedToolchains(msg.projects)
 
 		// Save scan to history
 		var totalSize int64
@@ -849,6 +965,7 @@ func (m UIModel) View() string {
 
 		// The Tier Visual Toggle
 		tierText := safeStyle.Render("Safe Mode (100% Regeneratable)")
+		tierNote := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Safe mode targets caches/artifacts/temp junk. Deep mode adds builds.")
 		if m.includeDeep {
 			tierText = deepStyle.Render("DEEP CLEAN MODE (Includes Binaries & Builds)")
 		}
@@ -867,7 +984,7 @@ func (m UIModel) View() string {
 			leftContent.WriteString(freedBanner + "\n\n")
 		}
 		leftContent.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
-		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s | Mode: %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText))
+		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s\n Mode: %s\n %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText, tierNote))
 
 		if len(filtered) == 0 {
 			leftContent.WriteString(" No project artifacts match the current filters. Orbit is clear!\n")
@@ -951,11 +1068,15 @@ func (m UIModel) View() string {
 			fullPath := filtered[m.cursor].Path
 			leftContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(fmt.Sprintf("\n 📍 %s", fullPath)) + "\n")
 		}
-		leftContent.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   a: select all   •   t: toggle tier   •   i: ignored   •   s: sort   •   /: search   •   p: preview   •   q: quit\n\n enter: trash them   •   X: nuke them\n"))
+		leftContent.WriteString(helpStyle.Render(
+			"\n ↑/↓: nav        •  space: select          •  a: select all          •  e: select ecosystem  •  S: select stale" +
+				"\n t: toggle mode  •  i: user-ignored        •  s: sort                •  /: search            •  p: preview" +
+				"\n q: quit         •  enter: trash them      •  X: nuke them\n"))
 
 		// Build Right Pane (Stats)
 		var rightContent strings.Builder
-		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 ORBITAL TELEMETRY") + "\n\n")
+		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 ORBITAL TELEMETRY") + "\n")
+		rightContent.WriteString(lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Projects identified by ecosystem 'triggers'.") + "\n\n")
 		// Disk Usage
 		usage, err := disk.Usage("/")
 		if err == nil {
@@ -1216,7 +1337,7 @@ func (m UIModel) View() string {
 		}
 
 		// ===== TAB BAR =====
-		tabNames := []string{"1: Projects", "2: Global", "3: History"}
+		tabNames := []string{"1: Projects", "2: Global", "3: History", "4: Launchpad"}
 		var tabParts []string
 		for i, name := range tabNames {
 			if tabIndex(i) == m.activeTab {
@@ -1238,6 +1359,43 @@ func (m UIModel) View() string {
 		switch m.activeTab {
 		case tabProjects:
 			return tabBar + mainView
+
+		case tabLaunchpad:
+			filtered := m.getFilteredProjects()
+			var lpView strings.Builder
+			lpView.WriteString(lipgloss.NewStyle().Bold(true).Render("🚀 PROJECT LAUNCHPAD") + "\n")
+			lpView.WriteString(lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Since Kessler already scanned your orbit, use this to jump into your projects.") + "\n\n")
+			lpView.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
+
+			if len(filtered) == 0 {
+				lpView.WriteString("  No projects found matching your search. Try a different query!\n")
+			} else {
+				for i, proj := range filtered {
+					visibleRows := m.height - 10
+					halfVisible := visibleRows / 2
+					if i < m.cursor-halfVisible || i > m.cursor+halfVisible {
+						continue
+					}
+
+					cursor := "  "
+					style := itemStyle
+					if m.cursor == i {
+						cursor = cursorStyle.Render("> ")
+						style = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
+					}
+
+					name := filepath.Base(proj.Path)
+					if len(name) > 40 {
+						name = name[:37] + "..."
+					}
+					
+					lpView.WriteString(fmt.Sprintf("%s%s %-40s %s\n", cursor, getIcon(proj.Type), style.Render(name), lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(proj.Path)))
+				}
+			}
+
+			lpView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   o: open in VS Code   •   t: open terminal   •   1/2/3/4: switch tab   •   q: quit\n"))
+			lpContent := lipgloss.NewStyle().Padding(1, 2).Render(lpView.String())
+			return tabBar + lpContent
 
 		case tabGlobal:
 			var globalView strings.Builder
@@ -1340,7 +1498,42 @@ func (m UIModel) View() string {
 				}
 			}
 
-			globalView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   enter: clean selected   •   1/2/3: switch tab   •   q: quit\n"))
+			// --- Environmental Doctor Section ---
+			if len(m.toolchains) > 0 {
+				globalView.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render("🧪 ENVIRONMENTAL DOCTOR") + "\n")
+				globalView.WriteString(lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Kessler checks if any of your scanned projects actually use these versions.") + "\n\n")
+				for _, t := range m.toolchains {
+					if len(t.Unused) > 0 {
+						globalView.WriteString(fmt.Sprintf("  %-10s: %d versions appear UNUSED\n", t.Name, len(t.Unused)))
+						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(
+							fmt.Sprintf("    Unused: %s", strings.Join(t.Unused, ", "))) + "\n")
+						
+						// Cleanup advice
+						advice := ""
+						if t.Name == "Node.js" {
+							advice = fmt.Sprintf("nvm uninstall %s", t.Unused[0])
+						} else if t.Name == "Rust" {
+							advice = fmt.Sprintf("rustup toolchain uninstall %s", t.Unused[0])
+						} else if t.Name == "Python" {
+							advice = fmt.Sprintf("pyenv uninstall %s", t.Unused[0])
+						} else if t.Name == "Ruby" {
+							advice = fmt.Sprintf("rbenv uninstall %s", t.Unused[0])
+						} else if t.Name == "Java" {
+							advice = fmt.Sprintf("sdk uninstall java %s", t.Unused[0])
+						} else if t.Name == "asdf" {
+							parts := strings.Fields(t.Unused[0])
+							advice = fmt.Sprintf("asdf uninstall %s %s", parts[0], parts[1])
+						} else if t.Name == "mise" {
+							parts := strings.Fields(t.Unused[0])
+							advice = fmt.Sprintf("mise uninstall %s@%s", parts[0], parts[1])
+						}
+						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Italic(true).Render(
+							fmt.Sprintf("    Tip: Run '%s' to save space", advice)) + "\n\n")
+					}
+				}
+			}
+
+			globalView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   enter: clean selected   •   1/2/3/4: switch tab   •   q: quit\n"))
 
 			globalContent := lipgloss.NewStyle().Padding(1, 2).Render(globalView.String())
 			return tabBar + globalContent
@@ -1473,6 +1666,34 @@ func (m UIModel) View() string {
 			))
 
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, nukeBox)
+
+	case stateConfirmActive:
+		var activeList strings.Builder
+		for path, procs := range m.activeProjects {
+			activeList.WriteString(fmt.Sprintf("  📁 %s\n", filepath.Base(path)))
+			for _, p := range procs {
+				activeList.WriteString(fmt.Sprintf("     └─ %s (PID: %d)\n", p.Name, p.PID))
+			}
+		}
+
+		activeBox := lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("#E5C07B")).
+			Padding(1, 3).
+			Width(60).
+			Render(fmt.Sprintf(
+				"%s\n\n"+
+					"  The following projects have ACTIVE processes running:\n\n%s\n"+
+					"  ⚠️  Cleaning active projects may cause build errors or\n"+
+					"  crashes in your dev servers.\n\n"+
+					"  Do you want to proceed anyway?\n\n"+
+					"  %s",
+				lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E5C07B")).Render("⚠️  ACTIVE PROJECTS DETECTED"),
+				activeList.String(),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("Press y to proceed, n to cancel"),
+			))
+
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, activeBox)
 
 	case stateCleaning:
 		msg := "Safely moving debris to Trash Bin..."
