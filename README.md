@@ -37,7 +37,6 @@ Over time, it gets clogged with `node_modules`, `targets`, stray `build/` folder
 ---
 
 ## 🚀 Installation
-
 <table width="100%">
   <tr>
     <td width="25%">🍺 <b>Homebrew</b><br><sup>macOS & Linux</sup></td>
@@ -65,6 +64,8 @@ scoop install kessler
 
 ```bash
 npm install -g kessler-cli
+# Or run directly without installing:
+npx kessler-cli ~/Projects
 ```
 </td>
   </tr>
@@ -86,17 +87,7 @@ sudo dpkg -i kessler_*.deb
 ```
 </td>
   </tr>
-  <tr>
-    <td>🐧 <b>AUR</b><br><sup>Arch Linux</sup></td>
-    <td>
-
-```bash
-yay -S kessler-bin
-```
-</td>
-  </tr>
 </table>
-
 ---
 
 ## 🎮 Usage
