@@ -131,19 +131,38 @@ type globalScanProgressMsg struct {
 }
 
 var (
-	titleStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FAFAFA")).Background(lipgloss.Color("#7D56F4")).Padding(0, 1).MarginBottom(1)
-	itemStyle     = lipgloss.NewStyle().PaddingLeft(2)
-	selectedStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("#04B575")).Bold(true)
-	cursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Bold(true)
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).MarginTop(1)
-	deepStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Bold(true) // Red color for danger mode
-	safeStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575"))            // Green for safe mode
-	ignoredStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Bold(true) // Yellow for ignored
+	// New Palette based on reference image
+	themeCyan       = lipgloss.Color("#00E6C3")
+	themeGreen      = lipgloss.Color("#04B575")
+	themeBrightGreen= lipgloss.Color("#00FF9C")
+	themeDarkGreen  = lipgloss.Color("#112A22")
+	themeOrange     = lipgloss.Color("#FF9E64")
+	themeRed        = lipgloss.Color("#FF5C5C")
+	themeGray       = lipgloss.Color("#565F89")
+	themeDarkGray   = lipgloss.Color("#2A2A37")
+	themeBorder     = lipgloss.Color("#292E42")
+	themeBgCard     = lipgloss.Color("#1A1B26")
+
+	titleStyle    = lipgloss.NewStyle().Foreground(themeGray).Bold(true).Padding(0, 1).MarginBottom(1)
+	itemStyle     = lipgloss.NewStyle().PaddingLeft(2).PaddingRight(2)
+	selectedStyle = lipgloss.NewStyle().PaddingLeft(2).PaddingRight(2).Background(themeDarkGreen)
+	cursorStyle   = lipgloss.NewStyle().Foreground(themeCyan).Bold(true)
+	helpStyle     = lipgloss.NewStyle().Foreground(themeGray).MarginTop(1)
+	deepStyle     = lipgloss.NewStyle().Foreground(themeRed).Bold(true)
+	safeStyle     = lipgloss.NewStyle().Foreground(themeGreen)
+	ignoredStyle  = lipgloss.NewStyle().Foreground(themeOrange).Bold(true)
 
 	paneStyle     = lipgloss.NewStyle().Padding(1, 2)
 	statsBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#7D56F4")).
+			BorderForeground(themeBorder).
+			Padding(1, 2).
+			MarginLeft(2).
+			MarginBottom(1)
+	
+	previewBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(themeBorder).
 			Padding(1, 2).
 			MarginLeft(2)
 )
@@ -441,6 +460,54 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case tea.MouseMsg:
+		if m.state == stateResults {
+			switch msg.Type {
+			case tea.MouseWheelUp:
+				if m.showPreviewModal {
+					if m.previewCursor > 0 {
+						m.previewCursor--
+					}
+				} else if m.activeTab == tabProjects || m.activeTab == tabLaunchpad {
+					if m.cursor > 0 {
+						m.cursor--
+					}
+				} else if m.activeTab == tabGlobal && m.globalCursor > 0 {
+					m.globalCursor--
+				}
+			case tea.MouseWheelDown:
+				if m.showPreviewModal {
+					filtered := m.getFilteredProjects()
+					if len(filtered) > 0 && m.cursor < len(filtered) {
+						activeProj := filtered[m.cursor]
+						var visibleArtifacts []engine.Artifact
+						for _, artifact := range activeProj.Artifacts {
+							if !m.includeDeep && artifact.Tier == engine.TierDeep {
+								continue
+							}
+							if !m.showIgnored && artifact.Tier == engine.TierIgnored {
+								continue
+							}
+							visibleArtifacts = append(visibleArtifacts, artifact)
+						}
+						if m.previewCursor < len(visibleArtifacts)-1 {
+							m.previewCursor++
+						}
+					}
+				} else if m.activeTab == tabProjects || m.activeTab == tabLaunchpad {
+					filtered := m.getFilteredProjects()
+					if m.cursor < len(filtered)-1 {
+						m.cursor++
+					}
+				} else if m.activeTab == tabGlobal {
+					if m.globalCursor < len(m.globalCaches)-1 {
+						m.globalCursor++
+					}
+				}
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -956,181 +1023,108 @@ func (m UIModel) View() string {
 
 	case stateResults:
 		filtered := m.getFilteredProjects()
-
+		windowWidth := m.width
+		if windowWidth == 0 {
+			windowWidth = 100
+		}
+		
 		var totalSelectable int64
 		for _, p := range filtered {
 			totalSelectable += p.TotalSize
 		}
 
-		sortText := "Size"
-		if m.sortMode == SortName {
-			sortText = "Name"
-		}
-
-		// The Tier Visual Toggle
-		tierText := safeStyle.Render("Safe Mode (100% Regeneratable)")
-		tierNote := lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Safe mode targets caches/artifacts/temp junk. Deep mode adds builds.")
+		tierLabel := "SAFE"
 		if m.includeDeep {
-			tierText = deepStyle.Render("DEEP CLEAN MODE (Includes Binaries & Builds)")
-		}
-		if m.showIgnored {
-			tierText += " " + ignoredStyle.Render("[+Ignored]")
+			tierLabel = "DEEP"
 		}
 
-		// Build Left Pane
-		var leftContent strings.Builder
-		leftContent.WriteString(titleStyle.Render("🚀 KESSLER: Clear the Debris") + "\n\n")
+		// 1. Top Navigation & Modes
+		macDots := lipgloss.NewStyle().Foreground(themeRed).Render("●") + " " +
+			lipgloss.NewStyle().Foreground(themeOrange).Render("●") + " " +
+			lipgloss.NewStyle().Foreground(themeBrightGreen).Render("●")
 
-		// Show freed space banner from last clean
-		if m.lastFreedSpace > 0 {
-			freedBanner := lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Bold(true).Render(
-				fmt.Sprintf(" ✨ Freed %s in the last sweep!", formatBytes(m.lastFreedSpace)))
-			leftContent.WriteString(freedBanner + "\n\n")
-		}
-		leftContent.WriteString(fmt.Sprintf(" %s\n\n", m.textInput.View()))
-		leftContent.WriteString(fmt.Sprintf(" Found %d projects | Total Debris: %s | Sort: %s\n Mode: %s\n %s\n\n", len(filtered), formatBytes(totalSelectable), sortText, tierText, tierNote))
-
-		if len(filtered) == 0 {
-			leftContent.WriteString(" No project artifacts match the current filters. Orbit is clear!\n")
-		} else {
-			for i, proj := range filtered {
-				// Dynamic pagination based on terminal height
-				visibleRows := m.height - 12 // subtract header, footer, search, summary lines
-				if visibleRows < 5 {
-					visibleRows = 5
-				}
-				halfVisible := visibleRows / 2
-				if i < m.cursor-halfVisible || i > m.cursor+halfVisible {
-					continue
-				}
-
-				cursor := " "
-				if m.cursor == i {
-					cursor = cursorStyle.Render(">")
-				}
-
-				checked := " "
-				if _, ok := m.selected[proj.Path]; ok {
-					checked = "x"
-				}
-
-				baseName := filepath.Base(proj.Path)
-				// Truncate baseName if it's too long
-				if len(baseName) > 25 {
-					baseName = baseName[:22] + "..."
-				}
-
-				// Calculate time since last touch
-				var timeStr string
-				if !proj.LastModTime.IsZero() {
-					duration := time.Since(proj.LastModTime)
-					days := int(duration.Hours() / 24)
-					if days > 365 {
-						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5C5C")).Render(fmt.Sprintf("%dy", days/365)) // Red if > 1 year
-					} else if days > 30 {
-						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Render(fmt.Sprintf("%dd", days)) // Yellow if > 1 month
-					} else if days == 0 {
-						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("today")
-					} else {
-						timeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(fmt.Sprintf("%dd", days)) // Grey if recent
-					}
-				}
-
-				// Sparkline: show relative size bar
-				var maxSize int64
-				for _, fp := range filtered {
-					if fp.TotalSize > maxSize {
-						maxSize = fp.TotalSize
-					}
-				}
-				sparkWidth := 8
-				var sparkFilled int
-				if maxSize > 0 {
-					sparkFilled = int(float64(proj.TotalSize) / float64(maxSize) * float64(sparkWidth))
-				}
-				if sparkFilled < 1 && proj.TotalSize > 0 {
-					sparkFilled = 1
-				}
-				sparkBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(strings.Repeat("█", sparkFilled)) + strings.Repeat("░", sparkWidth-sparkFilled)
-
-				// We want a clean columnar look. Format it with padding.
-				baseNamePadded := fmt.Sprintf("%-26s", baseName)
-				timeStrPadded := fmt.Sprintf("[%5s]", timeStr)
-				sizeStr := formatBytes(proj.TotalSize)
-
-				line := fmt.Sprintf("%s [%s] %s %s %s %s %s - %s", cursor, checked, getIcon(proj.Type), baseNamePadded, sparkBar, timeStrPadded, proj.Type, sizeStr)
-
-				if _, ok := m.selected[proj.Path]; ok {
-					leftContent.WriteString(selectedStyle.Render(line) + "\n")
-				} else {
-					leftContent.WriteString(itemStyle.Render(line) + "\n")
-				}
+		headerTitle := lipgloss.NewStyle().Foreground(themeGray).Bold(true).Render(fmt.Sprintf(" >_ KESSLER — %s — PROJECTS", tierLabel))
+		
+		// Tab bar calculation
+		tabNames := []string{"1: Projects", "2: Global", "3: History", "4: Launchpad"}
+		var tabParts []string
+		for i, name := range tabNames {
+			if tabIndex(i) == m.activeTab {
+				tabParts = append(tabParts, lipgloss.NewStyle().
+					Foreground(themeCyan).
+					Border(lipgloss.RoundedBorder()).
+					BorderForeground(themeCyan).
+					Padding(0, 1).
+					Render(name))
+			} else {
+				tabParts = append(tabParts, lipgloss.NewStyle().
+					Foreground(themeGray).
+					Padding(0, 2).
+					Render(name))
 			}
 		}
-		// Full project path tooltip
-		if len(filtered) > 0 && m.cursor < len(filtered) {
-			fullPath := filtered[m.cursor].Path
-			leftContent.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(fmt.Sprintf("\n 📍 %s", fullPath)) + "\n")
+		tabStr := lipgloss.JoinHorizontal(lipgloss.Center, tabParts...)
+		
+		modeToggle := ""
+		if m.includeDeep {
+			modeToggle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(themeBorder).Render(
+				lipgloss.NewStyle().Foreground(themeGray).Padding(0, 1).Render("SAFE") + 
+				lipgloss.NewStyle().Foreground(themeGray).Render("|") + 
+				lipgloss.NewStyle().Foreground(themeRed).Bold(true).Padding(0, 1).Render("DEEP"),
+			)
+		} else {
+			modeToggle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(themeBorder).Render(
+				lipgloss.NewStyle().Foreground(themeGreen).Bold(true).Padding(0, 1).Render("SAFE") + 
+				lipgloss.NewStyle().Foreground(themeGray).Render("|") + 
+				lipgloss.NewStyle().Foreground(themeGray).Padding(0, 1).Render("DEEP"),
+			)
 		}
-		leftContent.WriteString(helpStyle.Render(
-			"\n ↑/↓: nav        •  space: select          •  a: select all          •  e: select ecosystem  •  S: select stale" +
-				"\n t: toggle mode  •  i: user-ignored        •  s: sort                •  /: search            •  p: preview" +
-				"\n q: quit         •  enter: trash them      •  X: nuke them\n"))
 
-		// Build Right Pane (Stats)
+		// Spread tabs and toggle
+		spacerWidth := windowWidth - lipgloss.Width(tabStr) - lipgloss.Width(modeToggle) - 4
+		if spacerWidth < 0 { spacerWidth = 0 }
+		tabsRow := lipgloss.JoinHorizontal(lipgloss.Center, tabStr, strings.Repeat(" ", spacerWidth), modeToggle)
+
+		topSection := lipgloss.JoinVertical(lipgloss.Left,
+			lipgloss.JoinHorizontal(lipgloss.Center, macDots, "    ", headerTitle),
+			"",
+			tabsRow,
+			"")
+
+		// Pre-compute right pane so we know the width
 		var rightContent strings.Builder
-		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("📊 ORBITAL TELEMETRY") + "\n")
-		rightContent.WriteString(lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Projects identified by ecosystem 'triggers'.") + "\n\n")
-		// Disk Usage
+		rightContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeCyan).Render(" 🖲  ORBITAL STATS") + "\n\n")
+		
 		usage, err := disk.Usage("/")
+		var usedPercent float64
 		if err == nil {
-			usedPercent := usage.UsedPercent
-			rightContent.WriteString(fmt.Sprintf("Drive Total : %s\n", formatBytes(int64(usage.Total))))
-			rightContent.WriteString(fmt.Sprintf("Drive Used  : %s (%.1f%%)\n", formatBytes(int64(usage.Used)), usedPercent))
-			rightContent.WriteString(fmt.Sprintf("Drive Free  : %s\n\n", formatBytes(int64(usage.Free))))
-
-			// Simple progress bar
-			barWidth := 25
+			usedPercent = usage.UsedPercent
+			rightContent.WriteString(fmt.Sprintf("%-20s %6.0f%%\n", lipgloss.NewStyle().Foreground(themeGray).Render("Disk Used"), usedPercent))
+			barWidth := 28
 			usedBlocks := int((usedPercent / 100.0) * float64(barWidth))
-			if usedBlocks > barWidth {
-				usedBlocks = barWidth
-			}
-			if usedBlocks < 0 {
-				usedBlocks = 0
-			}
-			bar := strings.Repeat("█", usedBlocks) + strings.Repeat("░", barWidth-usedBlocks)
-
-			barColor := lipgloss.Color("#04B575") // Green
-			if usedPercent > 90 {
-				barColor = lipgloss.Color("#FF5C5C") // Red
-			} else if usedPercent > 75 {
-				barColor = lipgloss.Color("#E5C07B") // Yellow
-			}
-			coloredBar := lipgloss.NewStyle().Foreground(barColor).Render(bar)
-			rightContent.WriteString(fmt.Sprintf("[%s]\n\n", coloredBar))
-		} else {
-			rightContent.WriteString("Drive Stats : Unavailable\n\n")
+			if usedBlocks > barWidth { usedBlocks = barWidth }
+			if usedBlocks < 0 { usedBlocks = 0 }
+			bar := strings.Repeat("█", usedBlocks) + strings.Repeat(" ", barWidth-usedBlocks)
+			barColor := themeCyan
+			if usedPercent > 90 { barColor = themeRed }
+			rightContent.WriteString(lipgloss.NewStyle().Foreground(barColor).Render(bar) + "\n\n")
 		}
-
-		// Selected Debris Size
+		
+		rightContent.WriteString(fmt.Sprintf("%-20s %8s\n\n", lipgloss.NewStyle().Foreground(themeGray).Render("Total Debris"), lipgloss.NewStyle().Foreground(themeOrange).Bold(true).Render(formatBytes(totalSelectable))))
+		
 		var selectedSize int64
 		for _, proj := range m.projects {
 			if _, ok := m.selected[proj.Path]; ok {
 				for _, artifact := range proj.Artifacts {
-					if !m.includeDeep && artifact.Tier == engine.TierDeep {
-						continue
-					}
-					if !m.showIgnored && artifact.Tier == engine.TierIgnored {
-						continue
-					}
+					if !m.includeDeep && artifact.Tier == engine.TierDeep { continue }
+					if !m.showIgnored && artifact.Tier == engine.TierIgnored { continue }
 					selectedSize += artifact.Size
 				}
 			}
 		}
-
-		rightContent.WriteString(fmt.Sprintf("Total Debris: %s\n", formatBytes(totalSelectable)))
-		rightContent.WriteString(fmt.Sprintf("Selected    : %s\n", selectedStyle.Render(formatBytes(selectedSize))))
-		rightContent.WriteString(fmt.Sprintf("Projects    : %d\n\n", len(filtered)))
+		
+		rightContent.WriteString(fmt.Sprintf("%-20s %8s\n", lipgloss.NewStyle().Foreground(themeGray).Render("Selected"), lipgloss.NewStyle().Foreground(themeBrightGreen).Bold(true).Render(formatBytes(selectedSize))))
+		rightContent.WriteString(fmt.Sprintf("%-20s %8s\n\n", lipgloss.NewStyle().Foreground(themeGray).Render("Reclaimable"), lipgloss.NewStyle().Foreground(themeCyan).Bold(true).Render("100%")))
 
 		// Type Breakdown
 		breakdown := make(map[string]int64)
@@ -1139,230 +1133,267 @@ func (m UIModel) View() string {
 		}
 
 		if len(breakdown) > 0 {
-			rightContent.WriteString("Breakdown by Type:\n")
-			type kv struct {
-				Key   string
-				Value int64
-			}
+			rightContent.WriteString(lipgloss.NewStyle().Foreground(themeGray).Render("Breakdown:") + "\n")
+			type kv struct { Key string; Value int64 }
 			var ss []kv
-			for k, v := range breakdown {
-				ss = append(ss, kv{k, v})
-			}
-			sort.Slice(ss, func(i, j int) bool {
-				return ss[i].Value > ss[j].Value
-			})
+			for k, v := range breakdown { ss = append(ss, kv{k, v}) }
+			sort.Slice(ss, func(i, j int) bool { return ss[i].Value > ss[j].Value })
 			for i, kv := range ss {
-				if i > 5 { // Show top 6 types to avoid making the box too tall
-					rightContent.WriteString(" • ...\n")
+				if i > 4 {
+					rightContent.WriteString(lipgloss.NewStyle().Foreground(themeGray).Render(" • ...") + "\n")
 					break
 				}
-				rightContent.WriteString(fmt.Sprintf(" • %-15s: %s\n", kv.Key, formatBytes(kv.Value)))
+				rightContent.WriteString(fmt.Sprintf(" %s %s\n", lipgloss.NewStyle().Foreground(themeGray).Render("• "+kv.Key+":"), lipgloss.NewStyle().Foreground(themeCyan).Render(formatBytes(kv.Value))))
 			}
 		}
 
-		// Preview Pane (Deep Context)
+		statsBox := statsBoxStyle.Width(35).Render(rightContent.String())
+
+		// Preview pane
+		var previewContent strings.Builder
+		previewContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeOrange).Render(" 🔍 DEEP PREVIEW") + "\n\n")
+		
 		if len(filtered) > 0 && m.cursor < len(filtered) {
 			activeProj := filtered[m.cursor]
-
-			rightContent.WriteString("\n")
-			rightContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 TARGET PREVIEW") + "\n\n")
-			rightContent.WriteString(fmt.Sprintf("%s %s\n", getIcon(activeProj.Type), filepath.Base(activeProj.Path)))
-
-			// Collect visible artifacts
+			previewContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeGreen).Render(fmt.Sprintf("         %s/", filepath.Base(activeProj.Path))) + "\n")
+			
 			var visibleArtifacts []engine.Artifact
 			for _, artifact := range activeProj.Artifacts {
-				if !m.includeDeep && artifact.Tier == engine.TierDeep {
-					continue
-				}
-				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
-					continue
-				}
+				if !m.includeDeep && artifact.Tier == engine.TierDeep { continue }
+				if !m.showIgnored && artifact.Tier == engine.TierIgnored { continue }
 				visibleArtifacts = append(visibleArtifacts, artifact)
 			}
-
-			// Limit preview height based on terminal (leave room for header/footer/stats)
-			maxPreviewItems := m.height - 30
-			if maxPreviewItems < 3 {
-				maxPreviewItems = 3
-			}
-
+			
 			for i, artifact := range visibleArtifacts {
-				if i >= maxPreviewItems {
-					remaining := len(visibleArtifacts) - maxPreviewItems
-					rightContent.WriteString(fmt.Sprintf(" └─ %s\n",
-						lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(
-							fmt.Sprintf("+%d more items (press p to expand)", remaining))))
+				if i >= 6 {
+					previewContent.WriteString(lipgloss.NewStyle().Foreground(themeGray).Render(fmt.Sprintf("    └─ +%d more...", len(visibleArtifacts)-6)) + "\n")
 					break
 				}
-
-				tierColor := lipgloss.Color("#04B575") // Safe Green
-				tierLabel := ""
-				if artifact.Tier == engine.TierDeep {
-					tierColor = lipgloss.Color("#E5C07B") // Deep Yellow
-				} else if artifact.Tier == engine.TierDanger {
-					tierColor = lipgloss.Color("#FF5C5C") // Danger Red
-				} else if artifact.Tier == engine.TierIgnored {
-					tierColor = lipgloss.Color("#E5C07B") // Ignored Yellow
-					tierLabel = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#E5C07B")).Render("[user ignored]")
-				}
-
-				coloredPath := lipgloss.NewStyle().Foreground(tierColor).Render(filepath.Base(artifact.Path))
-				rightContent.WriteString(fmt.Sprintf(" ├─ %-15s : %s%s\n", coloredPath, formatBytes(artifact.Size), tierLabel))
-			}
-		}
-
-		statsBox := statsBoxStyle.Render(rightContent.String())
-
-		// We need to calculate widths so the layout works nicely.
-		// If width is 0 (WindowSizeMsg hasn't arrived yet), we'll guess a width.
-		windowWidth := m.width
-		if windowWidth == 0 {
-			windowWidth = 100
-		}
-
-		statsBoxWidth := lipgloss.Width(statsBox)
-		leftPaneWidth := windowWidth - statsBoxWidth - 4
-		if leftPaneWidth < 50 {
-			leftPaneWidth = 50 // fallback width to ensure content doesn't crash formatting
-		}
-
-		leftPaneContent := lipgloss.NewStyle().Width(leftPaneWidth).Render(leftContent.String())
-
-		mainView := paneStyle.Render(lipgloss.JoinHorizontal(lipgloss.Top, leftPaneContent, statsBox))
-
-		// Preview Modal Overlay
-		if m.showPreviewModal && len(filtered) > 0 && m.cursor < len(filtered) {
-			activeProj := filtered[m.cursor]
-
-			// Collect visible artifacts for the active project
-			var visibleArtifacts []engine.Artifact
-			for _, artifact := range activeProj.Artifacts {
-				if !m.includeDeep && artifact.Tier == engine.TierDeep {
-					continue
-				}
-				if !m.showIgnored && artifact.Tier == engine.TierIgnored {
-					continue
-				}
-				visibleArtifacts = append(visibleArtifacts, artifact)
-			}
-
-			// Left Pane: Artifact List
-			var listContent strings.Builder
-			listContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🎯 ARTIFACTS — "+filepath.Base(activeProj.Path)) + "\n\n")
-
-			for i, artifact := range visibleArtifacts {
-				cursor := "  "
-				if m.previewCursor == i {
-					cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render("> ")
-				}
-
-				tierColor := lipgloss.Color("#04B575")
-				tierLabel := ""
-				if artifact.Tier == engine.TierDeep {
-					tierColor = lipgloss.Color("#E5C07B")
-					tierLabel = " [deep]"
-				} else if artifact.Tier == engine.TierDanger {
-					tierColor = lipgloss.Color("#FF5C5C")
-					tierLabel = " [danger]"
-				} else if artifact.Tier == engine.TierIgnored {
-					tierColor = lipgloss.Color("#E5C07B")
-					tierLabel = " [ignored]"
-				}
-
-				name := filepath.Base(artifact.Path)
-				if len(name) > 30 {
-					name = name[:27] + "..."
-				}
-
-				coloredName := lipgloss.NewStyle().Foreground(tierColor).Render(name)
-				line := fmt.Sprintf("%s%-32s %8s%s", cursor, coloredName, formatBytes(artifact.Size), tierLabel)
-
-				if m.previewCursor == i {
-					listContent.WriteString(lipgloss.NewStyle().Background(lipgloss.Color("#2D2D2D")).Render(line) + "\n")
-				} else {
-					listContent.WriteString(line + "\n")
-				}
-			}
-
-			// Better modal sizing
-			modalWidth := int(float64(m.width) * 0.9)
-			if modalWidth > 110 {
-				modalWidth = 110
-			}
-			if modalWidth < 80 {
-				modalWidth = 80
-			}
-			modalHeight := int(float64(m.height) * 0.8)
-			if modalHeight > 30 {
-				modalHeight = 30
-			}
-			if modalHeight < 15 {
-				modalHeight = 15
-			}
-
-			// Right Pane: File Tree
-			var treeContent strings.Builder
-			if m.previewCursor < len(visibleArtifacts) {
-				selectedArtifact := visibleArtifacts[m.previewCursor]
-				treeContent.WriteString(lipgloss.NewStyle().Bold(true).Render("🌳 QUICK-LOOK: "+filepath.Base(selectedArtifact.Path)) + "\n\n")
+				prefix := "    ├─ "
+				if i == len(visibleArtifacts)-1 || i == 5 { prefix = "    └─ " }
 				
-				// Calculate max lines for tree based on modal height
-				maxTreeLines := modalHeight - 10
-				if maxTreeLines < 5 {
-					maxTreeLines = 5
-				}
-				treeContent.WriteString(renderFileTree(selectedArtifact.Path, maxTreeLines))
-			}
-
-			leftPane := lipgloss.NewStyle().
-				Width(modalWidth/2 - 3).
-				Padding(0, 1).
-				Render(listContent.String())
-
-			rightPane := lipgloss.NewStyle().
-				Width(modalWidth/2 - 3).
-				Padding(0, 1).
-				Border(lipgloss.NormalBorder(), false, false, false, true).
-				BorderForeground(lipgloss.Color("#444444")).
-				Render(treeContent.String())
-
-			modalContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
-			
-			modalBox := lipgloss.NewStyle().
-				Border(lipgloss.DoubleBorder()).
-				BorderForeground(lipgloss.Color("#7D56F4")).
-				Padding(1, 2).
-				Width(modalWidth).
-				Height(modalHeight).
-				Render(modalContent + "\n\n" +
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render("  ↑/↓: navigate   •   p: close preview"))
-
-			return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
-		}
-
-		// ===== TAB BAR =====
-		tabNames := []string{"1: Projects", "2: Global", "3: History", "4: Launchpad"}
-		var tabParts []string
-		for i, name := range tabNames {
-			if tabIndex(i) == m.activeTab {
-				tabParts = append(tabParts, lipgloss.NewStyle().
-					Bold(true).
-					Foreground(lipgloss.Color("#7D56F4")).
-					Background(lipgloss.Color("#2D2D2D")).
-					Padding(0, 2).
-					Render("[ "+name+" ]"))
-			} else {
-				tabParts = append(tabParts, lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#626262")).
-					Padding(0, 2).
-					Render("  "+name+"  "))
+				name := filepath.Base(artifact.Path)
+				if len(name) > 15 { name = name[:12] + "..." }
+				
+				tierColor := themeCyan
+				if artifact.Tier == engine.TierDeep { tierColor = themeOrange }
+				
+				line := lipgloss.JoinHorizontal(lipgloss.Left, 
+					lipgloss.NewStyle().Foreground(themeGray).Render(prefix),
+					lipgloss.NewStyle().Foreground(tierColor).Width(16).Render(name+"/"),
+					lipgloss.NewStyle().Foreground(themeGray).Width(8).Align(lipgloss.Right).Render(formatBytes(artifact.Size)))
+					
+				previewContent.WriteString(line + "\n")
 			}
 		}
-		tabBar := strings.Join(tabParts, "") + "\n\n"
+		previewBox := previewBoxStyle.Width(35).Height(12).Render(previewContent.String())
+		rightColumn := lipgloss.JoinVertical(lipgloss.Left, statsBox, previewBox)
 
+		// Calculate left pane width dynamically
+		rightColWidth := lipgloss.Width(rightColumn)
+		leftPaneWidth := windowWidth - rightColWidth - 8
+		if leftPaneWidth < 50 { leftPaneWidth = 50 }
+
+		// Switch tab rendering based on state
 		switch m.activeTab {
 		case tabProjects:
-			return tabBar + mainView
+			var leftContent strings.Builder
+			
+			scanBadge := lipgloss.NewStyle().Foreground(themeBrightGreen).Padding(0, 1).Bold(true).Border(lipgloss.RoundedBorder()).BorderForeground(themeBorder).Render("🚀 KESSLER SCAN")
+			scanSub := lipgloss.NewStyle().Foreground(themeGray).Italic(true).Render("Targeting 100% regeneratable caches")
+			spacer := leftPaneWidth - lipgloss.Width(scanBadge) - lipgloss.Width(scanSub) - 2
+			if spacer < 0 { spacer = 0 }
+			leftContent.WriteString(lipgloss.JoinHorizontal(lipgloss.Center, scanBadge, strings.Repeat(" ", spacer), scanSub) + "\n\n")
+
+			summaryStr := fmt.Sprintf("> 🛡️ Found %d targets | %s", len(filtered), lipgloss.NewStyle().Foreground(themeBrightGreen).Bold(true).Render(formatBytes(totalSelectable)))
+			summaryBox := lipgloss.NewStyle().Background(themeBgCard).Border(lipgloss.RoundedBorder()).BorderForeground(themeBorder).Padding(0, 1).Width(leftPaneWidth-2).Render(summaryStr)
+			leftContent.WriteString(summaryBox + "\n\n")
+
+			if len(filtered) == 0 {
+				leftContent.WriteString(lipgloss.NewStyle().Foreground(themeGray).Render(" No project artifacts match the current filters. Orbit is clear!\n"))
+			} else {
+				visibleRows := m.height - 24
+				if visibleRows < 5 { visibleRows = 5 }
+				halfVisible := visibleRows / 2
+				
+				for i, proj := range filtered {
+					if i < m.cursor-halfVisible || i > m.cursor+halfVisible { continue }
+
+					isSelected := m.cursor == i
+					_, isChecked := m.selected[proj.Path]
+					
+					arrow := "  "
+					if isSelected { arrow = lipgloss.NewStyle().Foreground(themeCyan).Bold(true).Render("→ ") }
+					
+					check := lipgloss.NewStyle().Foreground(themeGray).Render("[ ]")
+					if isChecked { check = lipgloss.NewStyle().Foreground(themeBrightGreen).Render("[x]") }
+					
+					icon := getIcon(proj.Type)
+					name := filepath.Base(proj.Path)
+					if len(name) > 20 { name = name[:17] + "..." }
+					
+					pathStr := lipgloss.NewStyle().Foreground(themeGray).Render(proj.Path)
+					// Truncate path to fit
+					maxPathLen := leftPaneWidth - 55 // Increase margin to make room for time and sparkline
+					if len(proj.Path) > maxPathLen && maxPathLen > 10 {
+						pathStr = lipgloss.NewStyle().Foreground(themeGray).Render("~/" + filepath.Base(filepath.Dir(proj.Path)) + "/" + filepath.Base(proj.Path))
+					}
+					
+					// Calculate time since last touch
+					var timeStr string
+					if !proj.LastModTime.IsZero() {
+						duration := time.Since(proj.LastModTime)
+						days := int(duration.Hours() / 24)
+						if days > 365 {
+							timeStr = lipgloss.NewStyle().Foreground(themeRed).Render(fmt.Sprintf("%dy", days/365)) // Red if > 1 year
+						} else if days > 30 {
+							timeStr = lipgloss.NewStyle().Foreground(themeOrange).Render(fmt.Sprintf("%dd", days)) // Yellow if > 1 month
+						} else if days == 0 {
+							timeStr = lipgloss.NewStyle().Foreground(themeGray).Render("today")
+						} else {
+							timeStr = lipgloss.NewStyle().Foreground(themeGray).Render(fmt.Sprintf("%dd", days)) // Grey if recent
+						}
+					}
+					timeStrPadded := fmt.Sprintf("[%5s]", timeStr)
+
+					// Sparkline: show relative size bar
+					var maxSize int64
+					for _, fp := range filtered {
+						if fp.TotalSize > maxSize {
+							maxSize = fp.TotalSize
+						}
+					}
+					sparkWidth := 8
+					var sparkFilled int
+					if maxSize > 0 {
+						sparkFilled = int(float64(proj.TotalSize) / float64(maxSize) * float64(sparkWidth))
+					}
+					if sparkFilled < 1 && proj.TotalSize > 0 {
+						sparkFilled = 1
+					}
+					sparkBar := lipgloss.NewStyle().Foreground(themeCyan).Render(strings.Repeat("█", sparkFilled)) + lipgloss.NewStyle().Foreground(themeGray).Render(strings.Repeat("░", sparkWidth-sparkFilled))
+
+					sizeStr := lipgloss.NewStyle().Foreground(themeBrightGreen).Bold(true).Render(formatBytes(proj.TotalSize))
+					
+					// Assemble row
+					rowNamePath := lipgloss.JoinHorizontal(lipgloss.Left, lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFF")).Render(name), "  ", pathStr)
+					
+					// Space between path and size
+					leftPartsWidth := lipgloss.Width(arrow) + lipgloss.Width(check) + 1 + lipgloss.Width(icon) + 1 + lipgloss.Width(rowNamePath)
+					rightPartsWidth := lipgloss.Width(sparkBar) + 1 + lipgloss.Width(timeStrPadded) + 1 + lipgloss.Width(sizeStr)
+					padWidth := leftPaneWidth - leftPartsWidth - rightPartsWidth - 4
+					if padWidth < 1 { padWidth = 1 }
+					
+					rowStr := lipgloss.JoinHorizontal(lipgloss.Center, arrow, check, " ", icon, " ", rowNamePath, strings.Repeat(" ", padWidth), sparkBar, " ", timeStrPadded, " ", sizeStr)
+					
+					if isSelected {
+						leftContent.WriteString(lipgloss.NewStyle().Background(themeDarkGreen).PaddingLeft(1).PaddingRight(1).Render(rowStr) + "\n\n")
+					} else {
+						leftContent.WriteString(lipgloss.NewStyle().PaddingLeft(1).PaddingRight(1).Render(rowStr) + "\n\n")
+					}
+				}
+			}
+
+			footer1 := lipgloss.JoinHorizontal(lipgloss.Left, 
+				lipgloss.NewStyle().Foreground(themeCyan).Render("↑/↓: NAV"), "   ",
+				lipgloss.NewStyle().Foreground(themeCyan).Render("SPACE: SELECT"), "   ",
+				lipgloss.NewStyle().Foreground(themeOrange).Render("E: ECOSYSTEM"), "   ",
+				lipgloss.NewStyle().Foreground(themeOrange).Render("S: STALE"), "   ",
+				lipgloss.NewStyle().Foreground(themeGreen).Render("T: TOGGLE MODE"), "   ",
+				lipgloss.NewStyle().Foreground(themeGray).Render("/: SEARCH"),
+			)
+			footer2 := lipgloss.NewStyle().Foreground(themeRed).Render("ENTER: CLEANUP")
+			leftContent.WriteString("\n" + footer1 + "\n\n" + footer2 + "\n")
+
+			leftCol := lipgloss.NewStyle().Width(leftPaneWidth).Render(leftContent.String())
+			mainView := lipgloss.JoinHorizontal(lipgloss.Top, leftCol, "  ", rightColumn)
+			
+			// Handle Search bar view if focused
+			if m.textInput.Focused() {
+				searchStr := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(themeCyan).Padding(0, 1).Render("Search: " + m.textInput.View())
+				return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, topSection, "\n", searchStr, "\n", mainView))
+			}
+
+			// Preview Modal Overlay
+			if m.showPreviewModal && len(filtered) > 0 && m.cursor < len(filtered) {
+				activeProj := filtered[m.cursor]
+
+				var visibleArtifacts []engine.Artifact
+				for _, artifact := range activeProj.Artifacts {
+					if !m.includeDeep && artifact.Tier == engine.TierDeep { continue }
+					if !m.showIgnored && artifact.Tier == engine.TierIgnored { continue }
+					visibleArtifacts = append(visibleArtifacts, artifact)
+				}
+
+				var listContent strings.Builder
+				listContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeCyan).Render("🎯 ARTIFACTS — "+filepath.Base(activeProj.Path)) + "\n\n")
+
+				for i, artifact := range visibleArtifacts {
+					cursor := "  "
+					if m.previewCursor == i {
+						cursor = lipgloss.NewStyle().Foreground(themeCyan).Render("> ")
+					}
+
+					tierColor := themeGreen
+					tierLabel := ""
+					if artifact.Tier == engine.TierDeep {
+						tierColor = themeOrange
+						tierLabel = " [deep]"
+					} else if artifact.Tier == engine.TierDanger {
+						tierColor = themeRed
+						tierLabel = " [danger]"
+					} else if artifact.Tier == engine.TierIgnored {
+						tierColor = themeOrange
+						tierLabel = " [ignored]"
+					}
+
+					name := filepath.Base(artifact.Path)
+					if len(name) > 30 { name = name[:27] + "..." }
+
+					coloredName := lipgloss.NewStyle().Foreground(tierColor).Render(name)
+					line := fmt.Sprintf("%s%-32s %8s%s", cursor, coloredName, formatBytes(artifact.Size), tierLabel)
+
+					if m.previewCursor == i {
+						listContent.WriteString(lipgloss.NewStyle().Background(themeDarkGreen).Render(line) + "\n")
+					} else {
+						listContent.WriteString(line + "\n")
+					}
+				}
+
+				modalWidth := int(float64(m.width) * 0.9)
+				if modalWidth > 110 { modalWidth = 110 }
+				if modalWidth < 80 { modalWidth = 80 }
+				modalHeight := int(float64(m.height) * 0.8)
+				if modalHeight > 30 { modalHeight = 30 }
+				if modalHeight < 15 { modalHeight = 15 }
+
+				var treeContent strings.Builder
+				if m.previewCursor < len(visibleArtifacts) {
+					selectedArtifact := visibleArtifacts[m.previewCursor]
+					treeContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeCyan).Render("🌳 QUICK-LOOK: "+filepath.Base(selectedArtifact.Path)) + "\n\n")
+					maxTreeLines := modalHeight - 10
+					if maxTreeLines < 5 { maxTreeLines = 5 }
+					treeContent.WriteString(renderFileTree(selectedArtifact.Path, maxTreeLines))
+				}
+
+				leftPane := lipgloss.NewStyle().Width(modalWidth/2 - 3).Padding(0, 1).Render(listContent.String())
+				rightPane := lipgloss.NewStyle().Width(modalWidth/2 - 3).Padding(0, 1).Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(themeBorder).Render(treeContent.String())
+
+				modalContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPane, rightPane)
+				
+				modalBox := lipgloss.NewStyle().
+					Border(lipgloss.DoubleBorder()).
+					BorderForeground(themeCyan).
+					Padding(1, 2).
+					Width(modalWidth).
+					Height(modalHeight).
+					Render(modalContent + "\n\n" +
+						lipgloss.NewStyle().Foreground(themeGray).Italic(true).Render("  ↑/↓: navigate   •   p: close preview"))
+
+				return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox)
+			}
+
+			return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, topSection, "\n", mainView))
 
 		case tabLaunchpad:
 			filtered := m.getFilteredProjects()
@@ -1398,19 +1429,19 @@ func (m UIModel) View() string {
 			}
 
 			lpView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   o: open in VS Code   •   t: open terminal   •   1/2/3/4: switch tab   •   q: quit\n"))
-			lpContent := lipgloss.NewStyle().Padding(1, 2).Render(lpView.String())
-			return tabBar + lpContent
+			lpContent := lipgloss.NewStyle().Render(lpView.String())
+			return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, topSection, "\n", lpContent))
 
 		case tabGlobal:
 			var globalView strings.Builder
-			globalView.WriteString(lipgloss.NewStyle().Bold(true).Render("🌍 GLOBAL CACHES") + "\n\n")
+			globalView.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeCyan).Render("🌍 GLOBAL CACHES") + "\n\n")
 
 			// Caution banner
 			cautionStyle := lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#FF5C5C")).
+				Foreground(themeRed).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.Color("#FF5C5C")).
+				BorderForeground(themeRed).
 				Padding(0, 2).
 				Width(70)
 			globalView.WriteString(cautionStyle.Render(
@@ -1428,7 +1459,7 @@ func (m UIModel) View() string {
 					filled = width
 				}
 				bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-				coloredBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(bar)
+				coloredBar := lipgloss.NewStyle().Foreground(themeCyan).Render(bar)
 
 				globalView.WriteString(fmt.Sprintf(
 					"  %s  Scanning global caches...\n\n"+
@@ -1439,8 +1470,8 @@ func (m UIModel) View() string {
 					coloredBar,
 					m.globalProcessed,
 					m.globalTotal,
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(m.globalCurrentCache),
-					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(m.globalTotalSize)),
+					lipgloss.NewStyle().Foreground(themeCyan).Render(m.globalCurrentCache),
+					lipgloss.NewStyle().Bold(true).Foreground(themeRed).Render(formatBytes(m.globalTotalSize)),
 				))
 			} else if len(m.globalCaches) == 0 {
 				globalView.WriteString("  No global caches detected. Your system is clean! 🎉\n")
@@ -1457,12 +1488,12 @@ func (m UIModel) View() string {
 
 				globalView.WriteString(fmt.Sprintf("  Found %d caches | Total: %s\n\n",
 					len(m.globalCaches),
-					lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF5C5C")).Render(formatBytes(totalGlobalSize))))
+					lipgloss.NewStyle().Bold(true).Foreground(themeRed).Render(formatBytes(totalGlobalSize))))
 
 				for i, cache := range m.globalCaches {
 					cursor := "  "
 					if m.globalCursor == i {
-						cursor = lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render("> ")
+						cursor = lipgloss.NewStyle().Foreground(themeCyan).Render("> ")
 					}
 
 					checked := " "
@@ -1479,7 +1510,7 @@ func (m UIModel) View() string {
 					if sparkFilled < 1 && cache.Size > 0 {
 						sparkFilled = 1
 					}
-					sparkBar := lipgloss.NewStyle().Foreground(lipgloss.Color("#7D56F4")).Render(strings.Repeat("█", sparkFilled)) + strings.Repeat("░", sparkWidth-sparkFilled)
+					sparkBar := lipgloss.NewStyle().Foreground(themeCyan).Render(strings.Repeat("█", sparkFilled)) + strings.Repeat("░", sparkWidth-sparkFilled)
 
 					name := fmt.Sprintf("%-14s", cache.Name)
 					sizeStr := fmt.Sprintf("%8s", formatBytes(cache.Size))
@@ -1487,7 +1518,7 @@ func (m UIModel) View() string {
 					line := fmt.Sprintf("%s[%s] %s %s %s  %s", cursor, checked, cache.Icon, name, sparkBar, sizeStr)
 
 					if _, ok := m.globalSelected[i]; ok {
-						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(line) + "\n")
+						globalView.WriteString(lipgloss.NewStyle().Foreground(themeBrightGreen).Render(line) + "\n")
 					} else if m.globalCursor == i {
 						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Render(line) + "\n")
 					} else {
@@ -1496,7 +1527,7 @@ func (m UIModel) View() string {
 
 					// Show description and CLI equivalent for selected item
 					if m.globalCursor == i {
-						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Italic(true).Render(
+						globalView.WriteString(lipgloss.NewStyle().Foreground(themeGray).Italic(true).Render(
 							fmt.Sprintf("     %s\n     Equivalent: %s", cache.Description, cache.CleanCommand)) + "\n")
 					}
 				}
@@ -1505,11 +1536,11 @@ func (m UIModel) View() string {
 			// --- Environmental Doctor Section ---
 			if len(m.toolchains) > 0 {
 				globalView.WriteString("\n" + lipgloss.NewStyle().Bold(true).Render("🧪 ENVIRONMENTAL DOCTOR") + "\n")
-				globalView.WriteString(lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#626262")).Render(" Kessler checks if any of your scanned projects actually use these versions.") + "\n\n")
+				globalView.WriteString(lipgloss.NewStyle().Italic(true).Foreground(themeGray).Render(" Kessler checks if any of your scanned projects actually use these versions.") + "\n\n")
 				for _, t := range m.toolchains {
 					if len(t.Unused) > 0 {
 						globalView.WriteString(fmt.Sprintf("  %-10s: %d versions appear UNUSED\n", t.Name, len(t.Unused)))
-						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render(
+						globalView.WriteString(lipgloss.NewStyle().Foreground(themeGray).Render(
 							fmt.Sprintf("    Unused: %s", strings.Join(t.Unused, ", "))) + "\n")
 						
 						// Cleanup advice
@@ -1531,7 +1562,7 @@ func (m UIModel) View() string {
 							parts := strings.Fields(t.Unused[0])
 							advice = fmt.Sprintf("mise uninstall %s@%s", parts[0], parts[1])
 						}
-						globalView.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Italic(true).Render(
+						globalView.WriteString(lipgloss.NewStyle().Foreground(themeBrightGreen).Italic(true).Render(
 							fmt.Sprintf("    Tip: Run '%s' to save space", advice)) + "\n\n")
 					}
 				}
@@ -1539,21 +1570,21 @@ func (m UIModel) View() string {
 
 			globalView.WriteString(helpStyle.Render("\n ↑/↓: nav   •   space: select   •   enter: clean selected   •   1/2/3/4: switch tab   •   q: quit\n"))
 
-			globalContent := lipgloss.NewStyle().Padding(1, 2).Render(globalView.String())
-			return tabBar + globalContent
+			globalContent := lipgloss.NewStyle().Render(globalView.String())
+			return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, topSection, "\n", globalContent))
 
 		case tabHistory:
 			var histView strings.Builder
-			histView.WriteString(lipgloss.NewStyle().Bold(true).Render("📜 SCAN HISTORY") + "\n\n")
+			histView.WriteString(lipgloss.NewStyle().Bold(true).Foreground(themeCyan).Render("📜 SCAN HISTORY") + "\n\n")
 
 			history := engine.LoadHistory()
 			if len(history.Entries) == 0 {
 				histView.WriteString("  No scan history yet. Run your first sweep!\n")
 			} else {
 				// Header
-				headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7D56F4"))
+				headerStyle := lipgloss.NewStyle().Bold(true).Foreground(themeCyan)
 				histView.WriteString(headerStyle.Render(fmt.Sprintf("  %-20s  %-30s  %8s  %10s  %10s", "Date", "Path", "Projects", "Debris", "Freed")) + "\n")
-				histView.WriteString("  " + strings.Repeat("─", 85) + "\n")
+				histView.WriteString(lipgloss.NewStyle().Foreground(themeBorder).Render("  " + strings.Repeat("─", 85)) + "\n")
 
 				// Show entries in reverse order (newest first)
 				for i := len(history.Entries) - 1; i >= 0; i-- {
@@ -1566,16 +1597,16 @@ func (m UIModel) View() string {
 
 					freedStr := ""
 					if entry.FreedSpace > 0 {
-						freedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#04B575")).Render(formatBytes(entry.FreedSpace))
+						freedStr = lipgloss.NewStyle().Foreground(themeBrightGreen).Render(formatBytes(entry.FreedSpace))
 					} else {
-						freedStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("—")
+						freedStr = lipgloss.NewStyle().Foreground(themeGray).Render("—")
 					}
 
 					debrisStr := ""
 					if entry.TotalSize > 0 {
 						debrisStr = formatBytes(entry.TotalSize)
 					} else {
-						debrisStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#626262")).Render("—")
+						debrisStr = lipgloss.NewStyle().Foreground(themeGray).Render("—")
 					}
 
 					histView.WriteString(fmt.Sprintf("  %-20s  %-30s  %8d  %10s  %10s\n",
@@ -1585,11 +1616,11 @@ func (m UIModel) View() string {
 
 			histView.WriteString(helpStyle.Render("\n 1/2/3: switch tab   •   q: quit\n"))
 
-			histContent := lipgloss.NewStyle().Padding(1, 2).Render(histView.String())
-			return tabBar + histContent
+			histContent := lipgloss.NewStyle().Render(histView.String())
+			return lipgloss.NewStyle().Padding(1, 2).Render(lipgloss.JoinVertical(lipgloss.Left, topSection, "\n", histContent))
 		}
 
-		return tabBar + mainView
+		return ""
 
 	case stateConfirmNuke:
 		if m.activeTab == tabGlobal {

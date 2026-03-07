@@ -42,7 +42,7 @@ Custom rules can be added at ~/.config/kessler/rules.yaml`,
 			scanPaths = args
 		}
 
-		p := tea.NewProgram(tui.InitialModel(scanPaths, deep, RulesData, CommunityRulesData, UserRulesData, excludes), tea.WithAltScreen())
+		p := tea.NewProgram(tui.InitialModel(scanPaths, deep, RulesData, CommunityRulesData, UserRulesData, excludes), tea.WithAltScreen(), tea.WithMouseCellMotion())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
 		}
