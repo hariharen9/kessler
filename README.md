@@ -30,6 +30,8 @@ Over time, it gets clogged with `node_modules`, `targets`, stray `build/` folder
 - 🛡️ **Active Project Protection:** Warns you before cleaning if a project's dev server is currently running.
 - 🧪 **Environmental Doctor:** Identifies and cleans unused versions of toolchains (Node.js, Rust, Python, Ruby, Java, etc.).
 - 🚀 **Project Launchpad:** A built-in navigator to fuzzy-search and instantly open projects in VS Code, Cursor, or Terminal.
+- 🤖 **Background Daemon:** Runs silently to automatically sweep stale debris over 1GB weekly.
+- 🌐 **Community Rules:** Dynamically updates and merges crowd-sourced cleanup rules via `kessler rules update`.
 - 📜 **Scan History:** Tracks previous sweeps and total space freed to monitor your disk's health over time.
 - 🤖 **CI / Scripting Mode:** Non-interactive `scan` and `clean` subcommands with JSON output, dry-run, and filtering.
 - 🎨 **Beautiful TUI & Telemetry:** An interactive Charmbracelet dashboard with 4 tabbed views and live "Orbital Telemetry".
@@ -126,7 +128,7 @@ kessler .               # Scan the current directory
 </details>
 
 <details>
-<summary><b>🤖 Non-Interactive / CI Mode</b></summary>
+<summary><b>🤖 CLI Subcommands</b></summary>
 
 #### `kessler scan`
 
@@ -145,6 +147,24 @@ Scan and clean — shows a preview and asks for confirmation. Includes **Active 
 kessler clean ~/Projects                         # Preview + confirm
 kessler clean ~/Projects --deep                  # Deep clean
 kessler clean ~/Projects --force                 # Skip confirmation + safety checks
+```
+
+#### `kessler daemon`
+
+Kessler can run silently in the background to monitor your system. It scans once a week and automatically sweeps away more than 1GB of stale debris (older than 10 days) in safe mode.
+
+```bash
+kessler daemon --start                           # Install and start the background daemon
+kessler daemon --status                          # Show current schedule status
+kessler daemon --stop                            # Uninstall the daemon
+```
+
+#### `kessler rules update`
+
+Fetch the latest community-provided project cleanup rules from GitHub and merge them locally.
+
+```bash
+kessler rules update
 ```
 
 </details>
@@ -216,7 +236,16 @@ rules:
       - path: "out_binaries"
         tier: "deep"
 ```
-Your custom rules will automatically merge with the default rules engine.
+Your custom rules will automatically merge with the default rules engine and the community rules.
+
+### Community Rules
+
+Kessler maintains a set of community-driven rules that are updated independently from the binary. You can fetch the latest community rules at any time:
+
+```bash
+kessler rules update
+```
+These rules are stored in `community-rules.yaml` in your config directory and are automatically applied during scans.
 
 ### `.gitignore` Intelligence
 

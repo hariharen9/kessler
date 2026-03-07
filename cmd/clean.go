@@ -58,7 +58,7 @@ func runClean(cmd *cobra.Command, args []string) error {
 		scanPaths = args
 	}
 
-	scanner, err := engine.NewScannerMerged(RulesData, UserRulesData)
+	scanner, err := engine.NewScannerMerged(RulesData, CommunityRulesData, UserRulesData, excludes)
 	if err != nil {
 		return fmt.Errorf("failed to load rules: %w", err)
 	}

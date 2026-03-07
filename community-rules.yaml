@@ -1,0 +1,11 @@
+# 🛰️ Kessler Community Rules
+# This file is fetched via `kessler rules update` and contains crowdsourced
+# rules for frameworks that may not be in the default binary.
+
+rules:
+  # Add community rules here over time
+  - name: "Example Community Framework"
+    triggers: ["example.config"]
+    targets:
+      - path: ".example-cache"
+        tier: "safe"

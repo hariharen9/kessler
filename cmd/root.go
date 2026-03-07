@@ -13,10 +13,14 @@ import (
 // RulesData is set by main.go from the embedded rules.yaml.
 var RulesData []byte
 
+// CommunityRulesData is loaded from ~/.config/kessler/community-rules.yaml if it exists.
+var CommunityRulesData []byte
+
 // UserRulesData is loaded from ~/.config/kessler/rules.yaml if it exists.
 var UserRulesData []byte
 
 var deep bool
+var excludes []string
 
 var rootCmd = &cobra.Command{
 	Use:   "kessler [paths...]",
@@ -29,6 +33,7 @@ Run without a subcommand to launch the interactive TUI dashboard.
 Custom rules can be added at ~/.config/kessler/rules.yaml`,
 	Args: cobra.ArbitraryArgs,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		loadCommunityRules()
 		loadUserRules()
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -37,11 +42,7 @@ Custom rules can be added at ~/.config/kessler/rules.yaml`,
 			scanPaths = args
 		}
 
-		// For the TUI, we pass both base and user rules.
-		// The TUI's scanner will need to use NewScannerMerged.
-		// For now, we pre-merge and pass the base rules (TUI uses NewScanner internally).
-		// We update the TUI to accept user rules separately.
-		p := tea.NewProgram(tui.InitialModel(scanPaths, deep, RulesData, UserRulesData), tea.WithAltScreen())
+		p := tea.NewProgram(tui.InitialModel(scanPaths, deep, RulesData, CommunityRulesData, UserRulesData, excludes), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
 		}
@@ -51,6 +52,7 @@ Custom rules can be added at ~/.config/kessler/rules.yaml`,
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&deep, "deep", "d", false, "Include deep-tier artifacts (builds, binaries)")
+	rootCmd.PersistentFlags().StringSliceVarP(&excludes, "exclude", "e", []string{}, "Exclude paths matching these patterns (can be used multiple times)")
 }
 
 func loadUserRules() {
@@ -66,6 +68,21 @@ func loadUserRules() {
 	}
 
 	UserRulesData = data
+}
+
+func loadCommunityRules() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+
+	configPath := filepath.Join(home, ".config", "kessler", "community-rules.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return
+	}
+
+	CommunityRulesData = data
 }
 
 func Execute() {

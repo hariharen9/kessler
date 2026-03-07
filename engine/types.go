@@ -48,8 +48,20 @@ func MergeConfigs(base, user Config) Config {
 						merged.Rules[i].Triggers = append(merged.Rules[i].Triggers, t)
 					}
 				}
-				// Append new targets
-				merged.Rules[i].Targets = append(merged.Rules[i].Targets, userRule.Targets...)
+				// Merge targets (override tier or append new)
+				for _, ut := range userRule.Targets {
+					foundTarget := false
+					for j, mt := range merged.Rules[i].Targets {
+						if mt.Path == ut.Path {
+							merged.Rules[i].Targets[j].Tier = ut.Tier
+							foundTarget = true
+							break
+						}
+					}
+					if !foundTarget {
+						merged.Rules[i].Targets = append(merged.Rules[i].Targets, ut)
+					}
+				}
 				found = true
 				break
 			}

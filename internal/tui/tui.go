@@ -79,8 +79,10 @@ type UIModel struct {
 	activeProjects map[string][]engine.ActiveProcess // Keyed by project path
 
 	// Configuration
-	rulesData     []byte
-	userRulesData []byte
+	rulesData          []byte
+	communityRulesData []byte
+	userRulesData      []byte
+	exclusions         []string
 
 	// Progress tracking for animated cleaning
 	totalToClean    int
@@ -159,7 +161,7 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-func InitialModel(scanPaths []string, includeDeep bool, rulesData []byte, userRulesData []byte) UIModel {
+func InitialModel(scanPaths []string, includeDeep bool, rulesData, communityRulesData, userRulesData []byte, exclusions []string) UIModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
@@ -170,18 +172,20 @@ func InitialModel(scanPaths []string, includeDeep bool, rulesData []byte, userRu
 	ti.Width = 40
 
 	return UIModel{
-		spinner:        s,
-		textInput:      ti,
-		state:          stateScanning,
-		selected:       make(map[string]struct{}),
-		globalSelected: make(map[int]struct{}),
-		activeProjects: make(map[string][]engine.ActiveProcess),
-		scanPaths:      scanPaths,
-		sortMode:       SortSize,
-		includeDeep:    includeDeep,
-		rulesData:      rulesData,
-		userRulesData:  userRulesData,
-		scanQuoteIndex: rand.Intn(len(spaceQuotes)),
+		spinner:            s,
+		textInput:          ti,
+		state:              stateScanning,
+		selected:           make(map[string]struct{}),
+		globalSelected:     make(map[int]struct{}),
+		activeProjects:     make(map[string][]engine.ActiveProcess),
+		scanPaths:          scanPaths,
+		sortMode:           SortSize,
+		includeDeep:        includeDeep,
+		rulesData:          rulesData,
+		communityRulesData: communityRulesData,
+		userRulesData:      userRulesData,
+		exclusions:         exclusions,
+		scanQuoteIndex:     rand.Intn(len(spaceQuotes)),
 	}
 }
 
@@ -215,7 +219,7 @@ func (m UIModel) startScan() tea.Cmd {
 	ch := make(chan tea.Msg, 50)
 
 	go func() {
-		scanner, err := engine.NewScannerMerged(m.rulesData, m.userRulesData)
+		scanner, err := engine.NewScannerMerged(m.rulesData, m.communityRulesData, m.userRulesData, m.exclusions)
 		if err != nil {
 			ch <- scanComplete{err: err}
 			return

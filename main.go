@@ -6,7 +6,7 @@ import (
 	"github.com/hariharen9/kessler/cmd"
 )
 
-//go:embed rules.yaml
+//go:embed assets/default-rules.yaml
 var defaultRules []byte
 
 func main() {

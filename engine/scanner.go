@@ -17,7 +17,8 @@ import (
 )
 
 type Scanner struct {
-	Config Config
+	Config     Config
+	Exclusions []string
 }
 
 func NewScanner(rulesData []byte) (*Scanner, error) {
@@ -29,23 +30,32 @@ func NewScanner(rulesData []byte) (*Scanner, error) {
 	return &Scanner{Config: config}, nil
 }
 
-// NewScannerMerged creates a Scanner from base rules, optionally merging user rules on top.
-// If userRulesData is nil or empty, it behaves identically to NewScanner.
-func NewScannerMerged(baseData []byte, userRulesData []byte) (*Scanner, error) {
-	var baseConfig Config
-	if err := yaml.Unmarshal(baseData, &baseConfig); err != nil {
+// NewScannerMerged creates a Scanner from base rules, optionally merging community and user rules on top.
+func NewScannerMerged(baseData, communityData, userRulesData []byte, exclusions []string) (*Scanner, error) {
+	var config Config
+	if err := yaml.Unmarshal(baseData, &config); err != nil {
 		return nil, err
 	}
 
+	// Layer 2: Community Rules
+	if len(communityData) > 0 {
+		var communityConfig Config
+		if err := yaml.Unmarshal(communityData, &communityConfig); err != nil {
+			return nil, fmt.Errorf("community rules: %w", err)
+		}
+		config = MergeConfigs(config, communityConfig)
+	}
+
+	// Layer 3: User Rules (Highest Priority)
 	if len(userRulesData) > 0 {
 		var userConfig Config
 		if err := yaml.Unmarshal(userRulesData, &userConfig); err != nil {
 			return nil, fmt.Errorf("user rules: %w", err)
 		}
-		baseConfig = MergeConfigs(baseConfig, userConfig)
+		config = MergeConfigs(config, userConfig)
 	}
 
-	return &Scanner{Config: baseConfig}, nil
+	return &Scanner{Config: config, Exclusions: exclusions}, nil
 }
 
 func (s *Scanner) Scan(roots []string) ([]Project, error) {
@@ -74,6 +84,17 @@ func (s *Scanner) Scan(roots []string) ([]Project, error) {
 			// .kesslerignore support: never scan this specific folder
 			if _, err := os.Stat(filepath.Join(path, ".kesslerignore")); err == nil {
 				return filepath.SkipDir
+			}
+
+			// CLI/Persistent exclusions
+			for _, pattern := range s.Exclusions {
+				if matched, _ := filepath.Match(pattern, d.Name()); matched {
+					return filepath.SkipDir
+				}
+				// Also check full path for absolute/nested exclusions
+				if strings.Contains(path, pattern) {
+					return filepath.SkipDir
+				}
 			}
 
 			for _, rule := range s.Config.Rules {
@@ -216,6 +237,16 @@ func (s *Scanner) ScanWithProgress(roots []string, progress chan<- ScanProgress)
 			// .kesslerignore support
 			if _, err := os.Stat(filepath.Join(path, ".kesslerignore")); err == nil {
 				return filepath.SkipDir
+			}
+
+			// CLI/Persistent exclusions
+			for _, pattern := range s.Exclusions {
+				if matched, _ := filepath.Match(pattern, d.Name()); matched {
+					return filepath.SkipDir
+				}
+				if strings.Contains(path, pattern) {
+					return filepath.SkipDir
+				}
 			}
 
 			atomic.AddInt64(&dirsChecked, 1)
@@ -441,10 +472,14 @@ func (s *Scanner) scanGitIgnored(projectRoot string, existingArtifacts []Artifac
 		return nil
 	}
 
-	// Build set of existing artifact base names for fast lookup
-	existingSet := make(map[string]bool)
+	// Build list of absolute paths of existing artifacts to prevent nested duplicates
+	var existingAbsPaths []string
 	for _, a := range existingArtifacts {
-		existingSet[filepath.Base(a.Path)] = true
+		if abs, err := filepath.Abs(a.Path); err == nil {
+			existingAbsPaths = append(existingAbsPaths, abs)
+		} else {
+			existingAbsPaths = append(existingAbsPaths, a.Path)
+		}
 	}
 
 	// Build set of all known rule target paths to filter out
@@ -481,9 +516,27 @@ func (s *Scanner) scanGitIgnored(projectRoot string, existingArtifacts []Artifac
 
 		// Remove trailing slash from directory entries
 		cleanName := strings.TrimSuffix(line, "/")
+		targetPath := filepath.Join(projectRoot, cleanName)
+		
+		absTarget, err := filepath.Abs(targetPath)
+		if err != nil {
+			absTarget = targetPath
+		}
 
-		// Skip if already covered by rules or existing artifacts
-		if existingSet[cleanName] || ruleTargetSet[cleanName] {
+		// Skip if already covered by existing artifacts (exact or parent directory)
+		isCovered := false
+		for _, existingAbs := range existingAbsPaths {
+			if absTarget == existingAbs || strings.HasPrefix(absTarget, existingAbs+string(filepath.Separator)) {
+				isCovered = true
+				break
+			}
+		}
+		if isCovered {
+			continue
+		}
+
+		// Skip if already covered by rule strings directly
+		if ruleTargetSet[cleanName] {
 			continue
 		}
 
@@ -513,7 +566,6 @@ func (s *Scanner) scanGitIgnored(projectRoot string, existingArtifacts []Artifac
 			continue
 		}
 
-		targetPath := filepath.Join(projectRoot, cleanName)
 		info, err := os.Stat(targetPath)
 		if err != nil {
 			continue
