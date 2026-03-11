@@ -45,4 +45,5 @@ kessler clean ~/Projects --deep --force --older-than 30d
 ## Links
 
 - [GitHub](https://github.com/hariharen9/kessler)
+- [VS Code Extension](https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode)
 - [Full Documentation](https://github.com/hariharen9/kessler#readme)

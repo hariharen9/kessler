@@ -4,9 +4,8 @@
   <img src="https://img.shields.io/github/v/release/hariharen9/kessler?style=for-the-badge&color=00ADD8&logo=go&logoColor=white" alt="Release">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/github/stars/hariharen9/kessler?style=for-the-badge&color=E3B341&logo=github&logoColor=white" alt="Stars">
-  <a href="https://goreportcard.com/report/github.com/hariharen9/kessler"><img src="https://goreportcard.com/badge/github.com/hariharen9/kessler?style=for-the-badge" alt="Go Report Card"></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/hariharen.kessler-vscode?style=for-the-badge&logo=visual-studio-code&color=007ACC&logoColor=white&label=VS%20Code%20Extension" alt="VS Code Extension"></a>
   <img src="https://img.shields.io/github/actions/workflow/status/hariharen9/kessler/release.yml?style=for-the-badge&logo=github-actions&logoColor=white" alt="Build Status">
-  <img src="https://img.shields.io/github/go-mod/go-version/hariharen9/kessler?style=for-the-badge&logo=go&logoColor=white" alt="Go Version">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Platform Support">
 </p>
 
@@ -35,6 +34,18 @@ Over time, it gets clogged with `node_modules`, `targets`, stray `build/` folder
 - 📜 **Scan History:** Tracks previous sweeps and total space freed to monitor your disk's health over time.
 - 🤖 **CI / Scripting Mode:** Non-interactive `scan` and `clean` subcommands with JSON output, dry-run, and filtering.
 - 🎨 **Beautiful TUI & Telemetry:** An interactive Charmbracelet dashboard with 4 tabbed views and live "Orbital Telemetry".
+
+---
+
+## ⌨️ Kessler for VS Code
+
+Bring the full power of Kessler directly into your editor. [**Kessler for VS Code**](https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode) is a blazingly fast, lightweight extension that lives in your status bar, giving you real-time telemetry and one-click cleanup without ever leaving your workspace.
+
+- **📡 Real-time Telemetry:** Live debris weight tracking in your status bar.
+- **🔄 Auto-Pilot:** Automatically cleans build caches on Git branch switches.
+- **⚡ Zero-Config:** Intelligent, ecosystem-aware scanning out of the box.
+
+[**Install from Marketplace →**](https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode)
 
 ---
 
