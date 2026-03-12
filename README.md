@@ -4,7 +4,9 @@
   <img src="https://img.shields.io/github/v/release/hariharen9/kessler?style=for-the-badge&color=00ADD8&logo=go&logoColor=white" alt="Release">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/github/stars/hariharen9/kessler?style=for-the-badge&color=E3B341&logo=github&logoColor=white" alt="Stars">
-  <a href="https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/hariharen.kessler-vscode?style=for-the-badge&logo=visual-studio-code&color=007ACC&logoColor=white&label=VS%20Code%20Extension" alt="VS Code Extension"></a>
+<a href="https://marketplace.visualstudio.com/items?itemName=hariharen.kessler-vscode">
+  <img src="https://img.shields.io/badge/VS%20Code-Extension-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white" alt="VS Code Extension">
+</a>
   <img src="https://img.shields.io/github/actions/workflow/status/hariharen9/kessler/release.yml?style=for-the-badge&logo=github-actions&logoColor=white" alt="Build Status">
   <img src="https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-333333?style=for-the-badge&logo=apple&logoColor=white" alt="Platform Support">
 </p>
