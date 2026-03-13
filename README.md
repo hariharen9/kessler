@@ -271,14 +271,37 @@ For every detected project, it runs `git ls-files --ignored --directory` to disc
 
 ---
 
-## ⚠️ The Safety Philosophy
+## 🛡️ Safety & Security
 
-Kessler is built with **developer trust** as its core tenet:
+Kessler is built with **developer trust** as its core tenet. We understand that your source code is your livelihood, so we've implemented multiple layers of protection:
 
-1. **Active Process Check:** It won't let you delete a project's `node_modules` while its dev server is still running.
-2. **It respects Git:** If Git tracks a folder (even if named `bin`), Kessler won't touch it.
-3. **It respects State:** It never targets files required to reproduce a build (like lockfiles) or environment secrets (like `.env`).
-4. **It respects the OS:** Moving files to the Trash Bin instead of permanent deletion gives you an "Undo" button.
+### 1. The Git Safety Net 🛡️
+Before Kessler touches any directory, it performs a real-time query: `git ls-files <path>`.
+- **The Guard:** If Git is tracking *even a single file* inside a folder (e.g., you manually added a specific script to a `bin/` folder), Kessler will **immediately skip** that folder.
+- **Why?** This prevents accidental deletion of manually tracked assets that happen to reside in common artifact locations.
+
+### 2. Active Project Protection (PID Check) 🛑
+Kessler scans your system's process table before performing a cleanup.
+- **The Guard:** If it detects a running process whose working directory is inside a project you're cleaning (e.g., an active `npm start`, `go run`, or `cargo watch`), it will flag the project as **ACTIVE** and block deletion until you provide an explicit override.
+- **Why?** Deleting artifacts while a compiler or dev server is using them can lead to corrupted builds or system hangs.
+
+### 3. Hardcoded "Danger Zone" Blocklist 🚫
+Kessler maintains a strict, non-overridable blocklist of critical system and project directories.
+- **The Guard:** Even if a buggy community rule or custom pattern targets `.git/`, `/etc/`, `/usr/bin/`, or your project's root source folders, the scanner will **hard-block** the operation at the engine level.
+
+### 4. Tiered Risk Levels (Safe ↔ Deep) ⚖️
+Not all artifacts are created equal. Kessler categorizes every target:
+- **Safe Tier (Default):** 100% regeneratable junk (caches, logs, temporary objects, package manager metadata).
+- **Deep Tier:** Re-buildable artifacts that take longer to regenerate (binaries, compiled objects, heavy `node_modules`).
+- **The Guard:** Kessler **defaults to Safe Mode**. You must intentionally toggle "Deep Clean" or use the `--deep` flag to touch binaries.
+
+### 5. OS Trash Integration ♻️
+Kessler avoids the destructive finality of `rm -rf`.
+- **The Guard:** All "deleted" items are moved to your **native OS Trash or Recycle Bin** using platform-specific APIs.
+- **The "Undo" Button:** If you realize you cleaned something by mistake, just open your Trash and click "Put Back."
+
+### 6. Rule-Based Context Awareness 🔍
+Kessler never "guesses." It only considers a folder for cleanup if it recognizes a valid **Project Trigger** (e.g., finding a `Cargo.toml` before looking for `target/`). It will never touch your family photos or personal documents because they don't match any known development ecosystem.
 
 
 ---
