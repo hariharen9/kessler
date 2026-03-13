@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/hariharen9/kessler/engine"
 	"github.com/mattn/go-isatty"
@@ -262,6 +263,19 @@ func runClean(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ⚠️  %d items failed to trash. Use --permanent to force delete.\n\n", failedCount)
 		}
 	}
+
+	// Save to history
+	var totalBefore int64
+	for _, p := range filtered {
+		totalBefore += p.TotalSize
+	}
+	engine.SaveEntry(engine.ScanHistoryEntry{
+		Timestamp:    time.Now(),
+		ScanPath:     strings.Join(scanPaths, ", "),
+		ProjectCount: len(filtered),
+		TotalSize:    totalBefore,
+		FreedSpace:   freedSpace,
+	})
 
 	return nil
 }

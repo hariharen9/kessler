@@ -274,6 +274,7 @@ func waitForProgress(ch chan tea.Msg) tea.Cmd {
 }
 
 func (m *UIModel) startCleaning() tea.Cmd {
+	m.lastFreedSpace = 0
 	m.cleaningQueue = []engine.Artifact{}
 	for _, proj := range m.projects {
 		if _, ok := m.selected[proj.Path]; ok {
@@ -803,6 +804,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ScanPath:     strings.Join(m.scanPaths, ", "),
 			ProjectCount: len(msg.projects),
 			TotalSize:    totalSize,
+			FreedSpace:   m.lastFreedSpace,
 		})
 		return m, nil
 
@@ -837,7 +839,7 @@ func (m UIModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.startScan()
 
 	case int64: // Finished fallback cleaning
-		m.lastFreedSpace = m.freedSpace + msg
+		m.lastFreedSpace = m.freedSpace
 		m.freedSpace = 0
 		m.selected = make(map[string]struct{})
 		m.cursor = 0

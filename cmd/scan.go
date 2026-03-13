@@ -97,6 +97,19 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return outputJSON(filtered)
 	}
 	outputTable(filtered)
+
+	// Save to history
+	var totalSize int64
+	for _, p := range filtered {
+		totalSize += p.TotalSize
+	}
+	engine.SaveEntry(engine.ScanHistoryEntry{
+		Timestamp:    time.Now(),
+		ScanPath:     strings.Join(scanPaths, ", "),
+		ProjectCount: len(filtered),
+		TotalSize:    totalSize,
+	})
+
 	return nil
 }
 
