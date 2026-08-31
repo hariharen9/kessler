@@ -40,14 +40,7 @@ jobs:
 
       - name: Publish to npm
         run: |
-          # Strip 'v' from the tag (e.g., v0.2.1 -> 0.2.1)
-          VERSION=${GITHUB_REF_NAME#v}
           cd npm
-          
-          # Update package.json version without creating a git commit/tag
-          npm version $VERSION --no-git-tag-version
-          
-          # Publish the package
           npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
