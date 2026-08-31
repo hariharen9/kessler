@@ -1,0 +1,4 @@
+# Ignore the downloaded native binaries — they are fetched at install time
+# by install.js. Only the kessler.js shim should be committed.
+kessler
+kessler.exe

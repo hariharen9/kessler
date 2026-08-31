@@ -1,6 +1,6 @@
 {
     "name": "kessler-cli",
-    "version": "0.1.1",
+    "version": "0.2.2",
     "description": "🛰️ Intelligent CLI tool to find and safely clean build artifacts & caches",
     "keywords": [
         "cleanup",
@@ -18,7 +18,7 @@
     "license": "MIT",
     "author": "Hariharen",
     "bin": {
-        "kessler": "bin/kessler"
+        "kessler": "bin/kessler.js"
     },
     "scripts": {
         "postinstall": "node install.js"
